@@ -763,6 +763,7 @@ set(pnnx_SRCS
     json_reader.cpp
     model_format.cpp
     model_stat.cpp
+    pt2_archive.cpp
     storezip.cpp
     utils.cpp
 
