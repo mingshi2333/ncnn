@@ -4,6 +4,7 @@
 #ifndef PNNX_STOREZIP_H
 #define PNNX_STOREZIP_H
 
+#include <stdio.h>
 #include <stdint.h>
 #include <map>
 #include <string>

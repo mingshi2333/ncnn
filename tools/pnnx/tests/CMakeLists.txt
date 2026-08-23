@@ -1,6 +1,17 @@
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+add_executable(pnnx_test_storezip
+    test_storezip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/storezip.cpp
+)
+target_include_directories(pnnx_test_storezip PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+add_test(
+    NAME test_storezip
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_storezip.py $<TARGET_FILE:pnnx_test_storezip>
+)
+
 macro(pnnx_add_test name)
     add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endmacro()
