@@ -778,7 +778,13 @@ int StoreZipWriter::open(const std::string& path)
 
 int StoreZipWriter::write_file(const std::string& name, const char* data, uint64_t size)
 {
-    long offset = ftell(fp);
+    const int64_t offset_signed = storezip_ftell(fp);
+    if (offset_signed < 0)
+    {
+        fprintf(stderr, "tell zip file failed\n");
+        return -1;
+    }
+    const uint64_t offset = (uint64_t)offset_signed;
 
     uint32_t signature = 0x04034b50;
     fwrite((char*)&signature, sizeof(signature), 1, fp);
@@ -834,7 +840,16 @@ int StoreZipWriter::close()
     if (!fp)
         return 0;
 
-    long offset = ftell(fp);
+    const int64_t offset_signed = storezip_ftell(fp);
+    if (offset_signed < 0)
+    {
+        fprintf(stderr, "tell zip file failed\n");
+        fclose(fp);
+        fp = 0;
+        filemetas.clear();
+        return -1;
+    }
+    const uint64_t offset = (uint64_t)offset_signed;
 
     for (const StoreZipMeta& szm : filemetas)
     {
@@ -879,7 +894,16 @@ int StoreZipWriter::close()
         fwrite((char*)&zip64_eef, sizeof(zip64_eef), 1, fp);
     }
 
-    long offset2 = ftell(fp);
+    const int64_t offset2_signed = storezip_ftell(fp);
+    if (offset2_signed < 0)
+    {
+        fprintf(stderr, "tell zip file failed\n");
+        fclose(fp);
+        fp = 0;
+        filemetas.clear();
+        return -1;
+    }
+    const uint64_t offset2 = (uint64_t)offset2_signed;
 
     {
         uint32_t signature = 0x06064b50;
