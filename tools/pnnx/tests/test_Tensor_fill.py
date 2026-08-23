@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -25,19 +27,18 @@ def test():
 
     a = net(x, y, z)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, y, z))
-    mod.save("test_Tensor_fill.pt")
+    mod = convert_and_import(
+        net,
+        (x, y, z),
+        "test_Tensor_fill",
+        pnnx_args=("inputshape=[6,16],[6,16],[1]",),
+    )
+    if mod is None:
+        return True
 
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_Tensor_fill.pt inputshape=[6,16],[6,16],[1]")
+    b = mod.test_inference()
 
-    # pnnx inference
-    import test_Tensor_fill_pnnx
-    b = test_Tensor_fill_pnnx.test_inference()
-
-    return torch.equal(a, b)
+    return check_numerical_result("test_Tensor_fill", torch.equal(a, b))
 
 if __name__ == "__main__":
     if test():
