@@ -30,8 +30,6 @@ int canonicalize_exported_arguments(const ExportedNode& node,
                                     std::vector<CanonicalExportedArgument>& result,
                                     std::string& error);
 
-bool is_exported_aten_target_supported(const ExportedAtenTarget& target);
-
 } // namespace pnnx
 
 #endif // PNNX_EXPORTED_PROGRAM_OPERATOR_H

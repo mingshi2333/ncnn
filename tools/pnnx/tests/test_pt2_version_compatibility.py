@@ -115,10 +115,10 @@ def load_generated_output(work_dir, basename):
 def parse_node_lines(output):
     nodes = {}
     for line in output.decode().splitlines():
-        fields = line.split("|", 5)
-        if len(fields) != 6 or fields[0] != "node":
+        fields = line.split("|", 4)
+        if len(fields) != 5 or fields[0] != "node":
             raise AssertionError("unexpected helper output: %s" % line)
-        nodes[fields[1]] = fields[5].split(";") if fields[5] else []
+        nodes[fields[1]] = fields[4].split(";") if fields[4] else []
     return nodes
 
 

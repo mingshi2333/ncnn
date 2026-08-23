@@ -31,11 +31,11 @@ def run_helper(*arguments):
 def parse_node_lines(output):
     result = {}
     for line in output.decode().splitlines():
-        fields = line.split("|", 5)
-        if len(fields) != 6 or fields[0] != "node":
+        fields = line.split("|", 4)
+        if len(fields) != 5 or fields[0] != "node":
             raise AssertionError(f"unexpected helper output: {line}")
-        arguments = fields[5].split(";") if fields[5] else []
-        result[fields[1]] = (fields[2], fields[3], fields[4], arguments)
+        arguments = fields[4].split(";") if fields[4] else []
+        result[fields[1]] = (fields[2], fields[3], arguments)
     return result
 
 
@@ -114,15 +114,15 @@ class ExportedProgramOperatorTest(unittest.TestCase):
         )
         nodes = parse_node_lines(result.stdout)
         self.assertEqual(
-            nodes["torch.ops.aten.add.Tensor"][3],
+            nodes["torch.ops.aten.add.Tensor"][2],
             ["self=tensor:x", "other=tensor:x", "alpha=int:1"],
         )
         self.assertEqual(
-            nodes["torch.ops.aten.flatten.using_ints"][3],
+            nodes["torch.ops.aten.flatten.using_ints"][2],
             ["self=tensor:add", "start_dim=int:1", "end_dim=int:-1"],
         )
         self.assertEqual(
-            nodes["torch.ops.aten.conv2d.default"][3],
+            nodes["torch.ops.aten.conv2d.default"][2],
             [
                 "input=tensor:x",
                 "weight=tensor:p_weight",
@@ -142,21 +142,21 @@ class ExportedProgramOperatorTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         nodes = parse_node_lines(result.stdout)
         add = nodes["torch.ops.aten.add.Tensor"]
-        self.assertEqual(add[:3], ("aten::add", "Tensor", "0"))
+        self.assertEqual(add[:2], ("aten::add", "Tensor"))
         self.assertEqual(
-            add[3], ["self=tensor:x", "other=tensor:x", "alpha=int:3"]
+            add[2], ["self=tensor:x", "other=tensor:x", "alpha=int:3"]
         )
 
-    def test_real_initial_allowlist(self):
+    def test_real_dispatcher_backed_targets(self):
         result, _ = self.export_and_inspect(LinearReluModel(), torch.ones(2, 4))
 
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         nodes = parse_node_lines(result.stdout)
         linear = nodes["torch.ops.aten.linear.default"]
         relu = nodes["torch.ops.aten.relu.default"]
-        self.assertEqual(linear[:3], ("aten::linear", "default", "1"))
-        self.assertEqual(relu[:3], ("aten::relu", "default", "1"))
-        self.assertEqual(linear[3][-1], "bias=tensor:p_linear_bias")
+        self.assertEqual(linear[:2], ("aten::linear", "default"))
+        self.assertEqual(relu[:2], ("aten::relu", "default"))
+        self.assertEqual(linear[2][-1], "bias=tensor:p_linear_bias")
 
 
 if __name__ == "__main__":

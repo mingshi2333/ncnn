@@ -776,6 +776,24 @@ static void test_flatten_dimensions()
     check(count_operator(graph, "aten::flatten") == 0 && count_operator(graph, "torch.flatten") == 1, "flatten pass level2", "flatten was not canonicalized");
 }
 
+static void test_dispatcher_backed_target_lowering()
+{
+    pnnx::ExportedProgram program = make_linear_relu_program();
+    program.graph.nodes[1].target = "torch.ops.aten.sigmoid.default";
+
+    pnnx::Graph graph;
+    std::string error;
+    const int result = pnnx::lower_exported_program(program, make_linear_state(), graph, error);
+
+    check(result == 0, "dispatcher backed target", error);
+    if (result != 0)
+        return;
+
+    pnnx::Operator* sigmoid = find_operator(graph, "aten::sigmoid");
+    check(sigmoid != 0, "dispatcher backed target", "missing aten::sigmoid");
+    check(sigmoid && sigmoid->inputnames == std::vector<std::string>({"self"}), "dispatcher backed target", "sigmoid input names are not canonical");
+}
+
 static void expect_lower_error(const pnnx::ExportedProgram& program,
                                const std::map<std::string, pnnx::MaterializedExportedTensor>& state,
                                const std::string& expected_error,
@@ -871,12 +889,6 @@ static void test_reject_invalid_graph_definitions()
         program.graph.outputs[0] = make_tensor("linear");
         program.output_specs[0].arg = make_tensor("linear");
         expect_lower_error(program, make_linear_state(), "tensor value linear is defined more than once", "duplicate tensor definition");
-    }
-
-    {
-        pnnx::ExportedProgram program = make_linear_relu_program();
-        program.graph.nodes[1].target = "torch.ops.aten.sigmoid.default";
-        expect_lower_error(program, make_linear_state(), "unsupported exported operator torch.ops.aten.sigmoid.default", "unsupported operator target");
     }
 
     {
@@ -1080,6 +1092,7 @@ int main(int argc, char** argv)
     test_inplace_add_is_functionalized_by_level2();
     test_adaptive_avg_pool2d_output_size();
     test_flatten_dimensions();
+    test_dispatcher_backed_target_lowering();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();
     test_reject_invalid_graph_definitions();

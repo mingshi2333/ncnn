@@ -115,7 +115,10 @@ def _test_input2():
     pnnx_net = mod.Model()
     pnnx_net.eval()
     b0 = pnnx_net(x0, y0)
-    b1 = pnnx_net(x1, y1)
+    try:
+        b1 = pnnx_net(x1, y1)
+    except RuntimeError:
+        return False
 
     return _allclose(a0, b0) and _allclose(a1, b1)
 

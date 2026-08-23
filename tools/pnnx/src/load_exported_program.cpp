@@ -358,11 +358,6 @@ int lower_exported_program(const ExportedProgram& program,
         ExportedAtenTarget target;
         if (parse_exported_aten_target(node.target, target, error) != 0)
             return -1;
-        if (!is_exported_aten_target_supported(target))
-        {
-            error = "unsupported exported operator " + node.target;
-            return -1;
-        }
 
         std::ostringstream generated_name;
         if (!node.has_name)

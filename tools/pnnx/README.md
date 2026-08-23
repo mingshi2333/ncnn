@@ -75,8 +75,9 @@ This creates `model_pnnx.pt2` and returns the `torch.export.ExportedProgram` obj
 - Static inference graphs with flat tensor user inputs and outputs
 - Parameters, persistent buffers and tensor constants with raw strided tensor payloads, including shape, stride and storage offset
 - Byte, Char, Short, Int, Long, Half, Float, Double, ComplexHalf, ComplexFloat, ComplexDouble, Bool and BFloat16 state tensors
-- `torch.ops.aten.adaptive_avg_pool2d.default`, `torch.ops.aten.batch_norm.default`, `torch.ops.aten.conv2d.default`, `torch.ops.aten.linear.default`, `torch.ops.aten.max_pool2d.default`, `torch.ops.aten.relu.default`, `torch.ops.aten.relu_.default`, `torch.ops.aten.add_.Tensor` and `torch.ops.aten.flatten.using_ints`
-- Operator defaults are resolved against the linked libtorch dispatcher and the archive ATen opset must match the linked libtorch opset
+- ATen operator targets registered by the linked libtorch dispatcher when their serialized arguments can be represented and the resulting graph can be lowered by the existing PNNX passes
+- Operator overloads and defaults are resolved against the linked libtorch dispatcher, and the archive ATen opset must match the linked libtorch opset
+- The exact operator and model support matrix is tracked by the `test_pt2_*` expectation suite
 
 ### Unsupported ExportedProgram features
 
@@ -85,7 +86,7 @@ This creates `model_pnnx.pt2` and returns the `torch.export.ExportedProgram` obj
 - Dynamic shapes, symbolic tensor metadata and range constraints
 - Training graphs, loss or gradient outputs, and parameter, buffer or user-input mutation outputs
 - Non-persistent buffers, custom objects, tokens and higher-order operators
-- Non-tensor user inputs or outputs and ATen operators outside the allowlist above
+- Non-tensor user inputs or outputs, unsupported serialized operator arguments and graphs which the existing PNNX passes cannot lower
 - Compressed or encrypted PT2 entries and PT2 archive versions other than `0`
 
 Unsupported inputs fail with a feature-specific `load exported program failed:` diagnostic. They are not silently treated as TorchScript.
