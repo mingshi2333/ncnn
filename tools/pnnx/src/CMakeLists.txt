@@ -761,6 +761,7 @@ endif()
 set(pnnx_SRCS
     exported_program_schema.cpp
     exported_program_tensor.cpp
+    load_exported_program.cpp
     main.cpp
     ir.cpp
     json_reader.cpp

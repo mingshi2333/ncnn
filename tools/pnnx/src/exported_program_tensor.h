@@ -21,6 +21,8 @@ struct MaterializedExportedTensor
     std::vector<char> data;
 };
 
+int exported_tensor_dtype_to_pnnx_type(int64_t dtype);
+
 int materialize_exported_tensor(const ExportedTensorMeta& meta,
                                 const std::vector<char>& storage,
                                 Pt2ByteOrder byte_order,

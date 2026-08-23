@@ -63,6 +63,15 @@ static int exported_dtype_info(int64_t dtype, ExportedDtypeInfo& info)
     return 0;
 }
 
+int exported_tensor_dtype_to_pnnx_type(int64_t dtype)
+{
+    ExportedDtypeInfo info;
+    if (exported_dtype_info(dtype, info) != 0)
+        return 0;
+
+    return info.pnnx_type;
+}
+
 static bool checked_multiply(uint64_t a, uint64_t b, uint64_t& result)
 {
     if (a != 0 && b > std::numeric_limits<uint64_t>::max() / a)
