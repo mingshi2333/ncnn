@@ -138,6 +138,11 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program_ir.py $<TARGET_FILE:pnnx_test_exported_program_ir>
 )
 
+add_test(
+    NAME test_exported_program
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program.py $<TARGET_FILE:pnnx>
+)
+
 macro(pnnx_add_test name)
     add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endmacro()

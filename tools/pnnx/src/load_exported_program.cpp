@@ -4,6 +4,7 @@
 #include "load_exported_program.h"
 
 #include "exported_program_operator.h"
+#include "pt2_archive.h"
 
 #include <limits.h>
 
@@ -11,6 +12,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pnnx {
@@ -406,6 +408,143 @@ int lower_exported_program(const ExportedProgram& program,
     graph.ops.swap(candidate.ops);
     graph.operands.swap(candidate.operands);
     return 0;
+}
+
+static int parse_program_json(const JsonValue& value, const std::string& entry, ExportedProgram& program, std::string& error)
+{
+    ExportedSchemaError schema_error;
+    if (parse_exported_program(value, program, schema_error) != 0)
+    {
+        error = "invalid exported program " + entry + " at " + schema_error.path + ": " + schema_error.message;
+        return -1;
+    }
+
+    return 0;
+}
+
+static int parse_payload_json(const JsonValue& value, const std::string& entry, ExportedPayloadConfig& config, std::string& error)
+{
+    ExportedSchemaError schema_error;
+    if (parse_exported_payload_config(value, config, schema_error) != 0)
+    {
+        error = "invalid exported payload config " + entry + " at " + schema_error.path + ": " + schema_error.message;
+        return -1;
+    }
+
+    return 0;
+}
+
+static int materialize_program_state(Pt2ArchiveReader& reader,
+                                     const ExportedProgram& program,
+                                     const ExportedPayloadConfig& weights,
+                                     const ExportedPayloadConfig& constants,
+                                     std::map<std::string, MaterializedExportedTensor>& state,
+                                     std::string& error)
+{
+    std::map<std::string, std::vector<char> > storage_cache;
+
+    for (size_t i = 0; i < program.input_specs.size(); i++)
+    {
+        const ExportedInputSpec& spec = program.input_specs[i];
+        if (spec.kind != EXPORTED_PARAMETER && spec.kind != EXPORTED_BUFFER && spec.kind != EXPORTED_TENSOR_CONSTANT)
+            continue;
+
+        const bool is_constant = spec.kind == EXPORTED_TENSOR_CONSTANT;
+        const ExportedPayloadConfig& config = is_constant ? constants : weights;
+        const ExportedPayloadConfig& wrong_config = is_constant ? weights : constants;
+        const char* config_name = is_constant ? "constants" : "weights";
+        const char* wrong_config_name = is_constant ? "weights" : "constants";
+        const char* state_kind = exported_state_kind_name(spec.kind);
+
+        if (wrong_config.entries.find(spec.target) != wrong_config.entries.end())
+        {
+            error = std::string(state_kind) + " " + spec.target + " is present in " + wrong_config_name + " config";
+            return -1;
+        }
+
+        const std::map<std::string, ExportedPayloadEntry>::const_iterator entry_it = config.entries.find(spec.target);
+        if (entry_it == config.entries.end())
+        {
+            error = std::string(state_kind) + " " + spec.target + " is missing from " + config_name + " config";
+            return -1;
+        }
+
+        const ExportedPayloadEntry& entry = entry_it->second;
+        const std::string directory = is_constant ? "/data/constants/" : "/data/weights/";
+        const std::string payload_path = reader.layout().root + directory + entry.path_name;
+
+        const bool expected_is_param = spec.kind == EXPORTED_PARAMETER;
+        if (entry.is_param != expected_is_param)
+        {
+            error = std::string(state_kind) + " " + spec.target + " in " + config_name + " config has is_param=" + (entry.is_param ? "true" : "false");
+            return -1;
+        }
+
+        if (entry.use_pickle || !entry.has_tensor_meta)
+        {
+            error = std::string("pickled payload is unsupported for ") + state_kind + " " + spec.target + " at " + payload_path;
+            return -1;
+        }
+
+        std::map<std::string, std::vector<char> >::iterator storage_it = storage_cache.find(payload_path);
+        if (storage_it == storage_cache.end())
+        {
+            storage_it = storage_cache.insert(std::make_pair(payload_path, std::vector<char>())).first;
+            if (reader.read_blob(payload_path, storage_it->second, error) != 0)
+                return -1;
+        }
+
+        MaterializedExportedTensor tensor;
+        if (materialize_exported_tensor(entry.tensor_meta, storage_it->second, reader.layout().byte_order, tensor, error) != 0)
+        {
+            error = spec.target + " from " + payload_path + ": " + error;
+            return -1;
+        }
+
+        state[spec.target] = std::move(tensor);
+    }
+
+    return 0;
+}
+
+int load_exported_program(const std::string& pt2path, Graph& graph, std::string& error)
+{
+    error.clear();
+
+    Pt2ArchiveReader reader;
+    if (reader.open(pt2path, error) != 0)
+        return -1;
+
+    ExportedProgram program;
+    ExportedPayloadConfig weights;
+    ExportedPayloadConfig constants;
+    {
+        JsonValue model_json;
+        if (reader.read_json(reader.layout().model_json_path, model_json, error) != 0)
+            return -1;
+        if (parse_program_json(model_json, reader.layout().model_json_path, program, error) != 0)
+            return -1;
+    }
+    {
+        JsonValue weights_json;
+        if (reader.read_json(reader.layout().weights_config_path, weights_json, error) != 0)
+            return -1;
+        if (parse_payload_json(weights_json, reader.layout().weights_config_path, weights, error) != 0)
+            return -1;
+    }
+    {
+        JsonValue constants_json;
+        if (reader.read_json(reader.layout().constants_config_path, constants_json, error) != 0)
+            return -1;
+        if (parse_payload_json(constants_json, reader.layout().constants_config_path, constants, error) != 0)
+            return -1;
+    }
+
+    std::map<std::string, MaterializedExportedTensor> state;
+    if (materialize_program_state(reader, program, weights, constants, state, error) != 0)
+        return -1;
+
+    return lower_exported_program(program, state, graph, error);
 }
 
 } // namespace pnnx
