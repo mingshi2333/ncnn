@@ -52,13 +52,33 @@ class BufferModel(torch.nn.Module):
         return x + self.value
 
 
+class ConstantInputModel(torch.nn.Module):
+    def forward(self, x, count: int):
+        return x + count
+
+
+class PrimitiveConstantInputsModel(torch.nn.Module):
+    def forward(
+        self,
+        x,
+        count: int,
+        scale: float,
+        enabled: bool,
+        label: str,
+        missing,
+    ):
+        if enabled and label == "ok" and missing is None:
+            return x * scale + count
+        return x
+
+
 class ExportedProgramSchemaTest(unittest.TestCase):
-    def export_and_inspect(self, model, inputs):
+    def export_and_inspect(self, model, inputs, command="inspect"):
         with tempfile.TemporaryDirectory() as temp_dir:
             archive_path = Path(temp_dir) / "schema.pt2"
             exported_program = torch.export.export(model.eval(), inputs)
             torch.export.save(exported_program, archive_path)
-            return run_helper("inspect", archive_path)
+            return run_helper(command, archive_path)
 
     def test_typed_schema_unit_matrix(self):
         result = run_helper()
@@ -74,6 +94,28 @@ class ExportedProgramSchemaTest(unittest.TestCase):
             result.stdout.decode().splitlines(),
             [
                 f"header|8|20|{torch.__version__}|10|2|0",
+                "payload|weights|linear.bias|weight_1|1|0|1|7|3|1|0|cpu|null|7|1",
+                "payload|weights|linear.weight|weight_0|1|0|1|7|3,4|4,1|0|cpu|null|7|1",
+            ],
+        )
+
+    def test_real_torch_export_graph_and_signature(self):
+        result = self.export_and_inspect(
+            TinyModel(), (torch.ones(2, 4),), command="inspect-graph"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        self.assertEqual(
+            result.stdout.decode().splitlines(),
+            [
+                f"header|8|20|{torch.__version__}|10|2|0",
+                "graph|3|2|1|5|0|3|1",
+                "input|parameter|p_linear_weight|linear.weight|0",
+                "input|parameter|p_linear_bias|linear.bias|0",
+                "input|user_input|x||0",
+                "node|linear|torch.ops.aten.linear.default|3|1",
+                "node|relu|torch.ops.aten.relu.default|1|1",
+                "output|user_output|relu|",
                 "payload|weights|linear.bias|weight_1|1|0|1|7|3|1|0|cpu|null|7|1",
                 "payload|weights|linear.weight|weight_0|1|0|1|7|3,4|4,1|0|cpu|null|7|1",
             ],
@@ -102,6 +144,39 @@ class ExportedProgramSchemaTest(unittest.TestCase):
                 "payload|weights|value|weight_0|0|0|1|7|3|1|0|cpu|null|7|0",
             ],
         )
+
+    def test_real_constant_input_signature(self):
+        result = self.export_and_inspect(
+            ConstantInputModel(), (torch.ones(3), 7), command="inspect-graph"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        self.assertEqual(
+            result.stdout.decode().splitlines(),
+            [
+                f"header|8|20|{torch.__version__}|10|0|0",
+                "graph|2|1|1|2|0|2|1",
+                "input|user_input|x||0",
+                "input|constant_input|count||0",
+                "node|add|torch.ops.aten.add.Tensor|2|1",
+                "output|user_output|add|",
+            ],
+        )
+
+    def test_real_primitive_constant_input_signatures(self):
+        result = self.export_and_inspect(
+            PrimitiveConstantInputsModel(),
+            (torch.ones(3), 7, 1.5, True, "ok", None),
+            command="inspect-graph",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        lines = result.stdout.decode().splitlines()
+        self.assertIn("input|constant_input|count||0", lines)
+        self.assertIn("input|constant_input|scale||0", lines)
+        self.assertIn("input|constant_input|enabled||0", lines)
+        self.assertIn("input|constant_input|label||0", lines)
+        self.assertIn("input|constant_input|missing||0", lines)
 
 
 if __name__ == "__main__":

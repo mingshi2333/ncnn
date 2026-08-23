@@ -58,6 +58,130 @@ static std::string tensor_meta_json(const std::string& sizes = "[{\"as_int\":3},
            + ",\"layout\":7}";
 }
 
+static std::string tensor_argument_json(const std::string& name)
+{
+    return "{\"as_tensor\":{\"name\":\"" + name + "\"}}";
+}
+
+struct ProgramFixture
+{
+    ProgramFixture()
+        : schema_minor("20"),
+          torch_version("2.12.1+cu126"),
+          graph_inputs("[" + tensor_argument_json("x") + "]"),
+          graph_outputs("[" + tensor_argument_json("y") + "]"),
+          nodes("[{\"target\":\"torch.ops.aten.relu.default\",\"inputs\":[{\"name\":\"self\",\"arg\":" + tensor_argument_json("x") + ",\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]"),
+          tensor_values("{\"x\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]") + ",\"y\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]") + "}"),
+          sym_int_values("{}"),
+          sym_bool_values("{}"),
+          custom_obj_values("{}"),
+          sym_float_values("{}"),
+          is_single_tensor_return("false"),
+          input_specs("[{\"user_input\":{\"arg\":" + tensor_argument_json("x") + "}}]"),
+          output_specs("[{\"user_output\":{\"arg\":" + tensor_argument_json("y") + "}}]"),
+          module_call_graph("[]"),
+          range_constraints("{}")
+    {
+    }
+
+    std::string json() const
+    {
+        return "{\"schema_version\":{\"major\":8,\"minor\":" + schema_minor + "},\"torch_version\":\"" + torch_version + "\",\"opset_version\":{\"aten\":10},\"graph_module\":{\"graph\":{\"inputs\":" + graph_inputs
+               + ",\"outputs\":" + graph_outputs
+               + ",\"nodes\":" + nodes
+               + ",\"tensor_values\":" + tensor_values
+               + ",\"sym_int_values\":" + sym_int_values
+               + ",\"sym_bool_values\":" + sym_bool_values
+               + ",\"is_single_tensor_return\":" + is_single_tensor_return
+               + ",\"custom_obj_values\":" + custom_obj_values
+               + ",\"sym_float_values\":" + sym_float_values
+               + "},\"signature\":{\"input_specs\":" + input_specs
+               + ",\"output_specs\":" + output_specs
+               + "},\"module_call_graph\":" + module_call_graph
+               + "},\"range_constraints\":" + range_constraints
+               + "}";
+    }
+
+    std::string schema_minor;
+    std::string torch_version;
+    std::string graph_inputs;
+    std::string graph_outputs;
+    std::string nodes;
+    std::string tensor_values;
+    std::string sym_int_values;
+    std::string sym_bool_values;
+    std::string custom_obj_values;
+    std::string sym_float_values;
+    std::string is_single_tensor_return;
+    std::string input_specs;
+    std::string output_specs;
+    std::string module_call_graph;
+    std::string range_constraints;
+};
+
+static bool parse_program_fixture(const ProgramFixture& fixture, pnnx::ExportedProgram& program, const std::string& label)
+{
+    test_paths++;
+
+    pnnx::JsonValue value;
+    if (!parse_document(fixture.json(), value, label))
+        return false;
+
+    pnnx::ExportedSchemaError error;
+    error.path = "stale";
+    error.message = "stale";
+    if (pnnx::parse_exported_program(value, program, error) != 0)
+    {
+        check(false, label, error.path + " " + error.message);
+        return false;
+    }
+
+    check(error.path.empty() && error.message.empty(), label, "success did not clear error");
+    return true;
+}
+
+static void expect_program_error(const ProgramFixture& fixture, const std::string& path, const std::string& message, const std::string& label)
+{
+    test_paths++;
+
+    pnnx::JsonValue value;
+    if (!parse_document(fixture.json(), value, label))
+        return;
+
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 99;
+    program.graph.inputs.push_back(pnnx::ExportedArgument());
+    program.input_specs.push_back(pnnx::ExportedInputSpec());
+    pnnx::ExportedSchemaError error;
+    if (pnnx::parse_exported_program(value, program, error) == 0)
+    {
+        check(false, label, "unexpected success");
+        return;
+    }
+
+    check(error.path == path, label, "unexpected path " + error.path);
+    check(error.message.find(message) != std::string::npos, label, "unexpected message " + error.message);
+    check(program.header.schema_major == 0 && program.graph.inputs.empty() && program.input_specs.empty(), label, "failure did not reset output");
+}
+
+static bool parse_argument_case(const std::string& argument_json, const std::string& kind_field, pnnx::ExportedArgument& argument, pnnx::ExportedArgumentKind& kind, const std::string& label)
+{
+    ProgramFixture fixture;
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":" + argument_json + kind_field + "}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+
+    pnnx::ExportedProgram program;
+    if (!parse_program_fixture(fixture, program, label))
+        return false;
+
+    check(program.graph.nodes.size() == 1 && program.graph.nodes[0].inputs.size() == 1, label, "argument node shape changed");
+    if (program.graph.nodes.size() != 1 || program.graph.nodes[0].inputs.size() != 1)
+        return false;
+
+    argument = program.graph.nodes[0].inputs[0].arg;
+    kind = program.graph.nodes[0].inputs[0].kind;
+    return true;
+}
+
 static void expect_header(const std::string& text, int schema_major, int schema_minor, const std::string& torch_version, int64_t aten_opset, const std::string& label)
 {
     test_paths++;
@@ -382,6 +506,301 @@ static void test_payload_config()
     expect_payload_error("{\"config\":{\"linear.weight\":{\"path_name\":\"weight_0\",\"is_param\":true,\"use_pickle\":false,\"tensor_meta\":true}}}", "$.config[\"linear.weight\"].tensor_meta", "expected object", "payload tensor meta type");
 }
 
+static void test_tiny_program()
+{
+    ProgramFixture fixture;
+    fixture.graph_inputs = "[" + tensor_argument_json("p_linear_weight") + "," + tensor_argument_json("p_linear_bias") + "," + tensor_argument_json("x") + "]";
+    fixture.graph_outputs = "[" + tensor_argument_json("relu") + "]";
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.linear.default\",\"inputs\":[{\"name\":\"input\",\"arg\":" + tensor_argument_json("x") + ",\"kind\":1},{\"name\":\"weight\",\"arg\":" + tensor_argument_json("p_linear_weight") + ",\"kind\":1},{\"name\":\"bias\",\"arg\":" + tensor_argument_json("p_linear_bias") + ",\"kind\":1}],\"outputs\":[" + tensor_argument_json("linear") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"linear\"},{\"target\":\"torch.ops.aten.relu.default\",\"inputs\":[{\"name\":\"self\",\"arg\":" + tensor_argument_json("linear") + ",\"kind\":1}],\"outputs\":[" + tensor_argument_json("relu") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"relu\"}]";
+    fixture.tensor_values = "{\"p_linear_weight\":" + tensor_meta_json()
+                            + ",\"p_linear_bias\":" + tensor_meta_json("[{\"as_int\":3}]", "[{\"as_int\":1}]")
+                            + ",\"x\":" + tensor_meta_json("[{\"as_int\":2},{\"as_int\":4}]", "[{\"as_int\":4},{\"as_int\":1}]")
+                            + ",\"linear\":" + tensor_meta_json("[{\"as_int\":2},{\"as_int\":3}]", "[{\"as_int\":3},{\"as_int\":1}]")
+                            + ",\"relu\":" + tensor_meta_json("[{\"as_int\":2},{\"as_int\":3}]", "[{\"as_int\":3},{\"as_int\":1}]") + "}";
+    fixture.input_specs = "[{\"parameter\":{\"arg\":{\"name\":\"p_linear_weight\"},\"parameter_name\":\"linear.weight\"}},{\"parameter\":{\"arg\":{\"name\":\"p_linear_bias\"},\"parameter_name\":\"linear.bias\"}},{\"user_input\":{\"arg\":" + tensor_argument_json("x") + "}}]";
+    fixture.output_specs = "[{\"user_output\":{\"arg\":" + tensor_argument_json("relu") + "}}]";
+
+    pnnx::ExportedProgram program;
+    if (!parse_program_fixture(fixture, program, "program tiny graph"))
+        return;
+
+    check(program.header.schema_major == 8 && program.header.schema_minor == 20, "program tiny graph", "header changed");
+    check(program.graph.inputs.size() == 3 && program.graph.inputs[0].name == "p_linear_weight" && program.graph.inputs[2].name == "x", "program tiny graph", "graph inputs changed");
+    check(program.graph.nodes.size() == 2, "program tiny graph", "node count changed");
+    if (program.graph.nodes.size() == 2)
+    {
+        check(program.graph.nodes[0].target == "torch.ops.aten.linear.default" && program.graph.nodes[0].has_name && program.graph.nodes[0].name == "linear", "program tiny graph", "linear identity changed");
+        check(program.graph.nodes[0].inputs.size() == 3 && program.graph.nodes[0].inputs[1].name == "weight" && program.graph.nodes[0].inputs[1].kind == pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL, "program tiny graph", "linear inputs changed");
+        check(program.graph.nodes[1].target == "torch.ops.aten.relu.default" && program.graph.nodes[1].outputs.size() == 1 && program.graph.nodes[1].outputs[0].name == "relu", "program tiny graph", "relu node changed");
+    }
+    check(program.graph.outputs.size() == 1 && program.graph.outputs[0].name == "relu", "program tiny graph", "graph output changed");
+    check(program.graph.tensor_values.size() == 5 && program.graph.tensor_values.find("linear")->second.sizes[1] == 3, "program tiny graph", "tensor values changed");
+    check(program.input_specs.size() == 3 && program.input_specs[0].kind == pnnx::EXPORTED_PARAMETER && program.input_specs[0].target == "linear.weight" && program.input_specs[2].kind == pnnx::EXPORTED_USER_INPUT, "program tiny graph", "input signature changed");
+    check(program.output_specs.size() == 1 && program.output_specs[0].kind == pnnx::EXPORTED_USER_OUTPUT && program.output_specs[0].arg.name == "relu", "program tiny graph", "output signature changed");
+}
+
+static void test_graph_arguments()
+{
+    pnnx::ExportedArgument argument;
+    pnnx::ExportedArgumentKind kind = pnnx::EXPORTED_ARGUMENT_KIND_MISSING;
+
+    if (parse_argument_case("{\"as_none\":true}", ",\"kind\":0", argument, kind, "argument none"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_NONE && kind == pnnx::EXPORTED_ARGUMENT_KIND_UNKNOWN, "argument none", "none changed");
+
+    if (parse_argument_case(tensor_argument_json("x"), ",\"kind\":1", argument, kind, "argument tensor"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_TENSOR && argument.name == "x" && kind == pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL, "argument tensor", "tensor changed");
+
+    if (parse_argument_case("{\"as_tensors\":[{\"name\":\"x\"},{\"name\":\"y\"}]}", ",\"kind\":2", argument, kind, "argument tensor list"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_TENSOR_LIST && argument.tensor_names.size() == 2 && argument.tensor_names[1] == "y" && kind == pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD, "argument tensor list", "tensor list changed");
+
+    if (parse_argument_case("{\"as_int\":-3}", ",\"kind\":null", argument, kind, "argument int"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_INT && argument.int_value == -3 && kind == pnnx::EXPORTED_ARGUMENT_KIND_MISSING, "argument int", "int changed");
+
+    if (parse_argument_case("{\"as_ints\":[1,-1,3]}", "", argument, kind, "argument int list"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_INT_LIST && argument.int_values.size() == 3 && argument.int_values[1] == -1 && kind == pnnx::EXPORTED_ARGUMENT_KIND_MISSING, "argument int list", "int list changed");
+
+    if (parse_argument_case("{\"as_float\":1.25}", ",\"kind\":1", argument, kind, "argument float"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && argument.float_value == 1.25, "argument float", "float changed");
+
+    if (parse_argument_case("{\"as_floats\":[1.5,-2.25]}", ",\"kind\":1", argument, kind, "argument float list"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST && argument.float_values.size() == 2 && argument.float_values[1] == -2.25, "argument float list", "float list changed");
+
+    if (parse_argument_case("{\"as_bool\":true}", ",\"kind\":1", argument, kind, "argument bool"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_BOOL && argument.bool_value, "argument bool", "bool changed");
+
+    if (parse_argument_case("{\"as_bools\":[true,false]}", ",\"kind\":1", argument, kind, "argument bool list"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_BOOL_LIST && argument.bool_values.size() == 2 && !argument.bool_values[1], "argument bool list", "bool list changed");
+
+    if (parse_argument_case("{\"as_string\":\"nearest\"}", ",\"kind\":1", argument, kind, "argument string"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_STRING && argument.string_value == "nearest", "argument string", "string changed");
+
+    if (parse_argument_case("{\"as_strings\":[\"a\",\"b\"]}", ",\"kind\":1", argument, kind, "argument string list"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_STRING_LIST && argument.string_values.size() == 2 && argument.string_values[1] == "b", "argument string list", "string list changed");
+
+    if (parse_argument_case("{\"as_scalar_type\":7}", ",\"kind\":1", argument, kind, "argument scalar type"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE && argument.enum_value == 7, "argument scalar type", "scalar type changed");
+
+    if (parse_argument_case("{\"as_memory_format\":2}", ",\"kind\":1", argument, kind, "argument memory format"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT && argument.enum_value == 2, "argument memory format", "memory format changed");
+
+    if (parse_argument_case("{\"as_layout\":7}", ",\"kind\":1", argument, kind, "argument layout"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_LAYOUT && argument.enum_value == 7, "argument layout", "layout changed");
+
+    if (parse_argument_case("{\"as_device\":{\"type\":\"cuda\",\"index\":2}}", ",\"kind\":1", argument, kind, "argument device"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_DEVICE && argument.device_value.type == "cuda" && argument.device_value.has_index && argument.device_value.index == 2, "argument device", "device changed");
+
+    if (parse_argument_case("{\"as_sym_int\":{\"as_int\":5}}", ",\"kind\":1", argument, kind, "argument static sym int"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_INT && argument.int_value == 5, "argument static sym int", "static sym int changed");
+
+    if (parse_argument_case("{\"as_sym_ints\":[{\"as_int\":2},{\"as_int\":-1}]}", ",\"kind\":1", argument, kind, "argument static sym ints"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_INT_LIST && argument.int_values.size() == 2 && argument.int_values[1] == -1, "argument static sym ints", "static sym ints changed");
+
+    if (parse_argument_case("{\"as_sym_float\":{\"as_float\":1.5}}", ",\"kind\":1", argument, kind, "argument static sym float"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && argument.float_value == 1.5, "argument static sym float", "static sym float changed");
+
+    if (parse_argument_case("{\"as_sym_floats\":[{\"as_float\":1.5},{\"as_float\":2.5}]}", ",\"kind\":1", argument, kind, "argument static sym floats"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST && argument.float_values.size() == 2 && argument.float_values[1] == 2.5, "argument static sym floats", "static sym floats changed");
+
+    if (parse_argument_case("{\"as_sym_bool\":{\"as_bool\":false}}", ",\"kind\":1", argument, kind, "argument static sym bool"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_BOOL && !argument.bool_value, "argument static sym bool", "static sym bool changed");
+
+    if (parse_argument_case("{\"as_sym_bools\":[{\"as_bool\":true},{\"as_bool\":false}]}", ",\"kind\":1", argument, kind, "argument static sym bools"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_BOOL_LIST && argument.bool_values.size() == 2 && !argument.bool_values[1], "argument static sym bools", "static sym bools changed");
+
+    if (parse_argument_case("{\"as_sym_int\":{\"as_name\":\"s0\"}}", ",\"kind\":1", argument, kind, "argument dynamic sym int"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_sym_int" && argument.name == "s0", "argument dynamic sym int", "dynamic sym int classification changed");
+
+    if (parse_argument_case("{\"as_custom_obj\":{\"name\":\"obj\",\"class_fqn\":\"pkg.Type\"}}", ",\"kind\":1", argument, kind, "argument custom object"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_custom_obj" && argument.name == "obj" && argument.string_value == "pkg.Type", "argument custom object", "custom object classification changed");
+
+    if (parse_argument_case("{\"as_operator\":\"torch.ops.aten.relu.default\"}", ",\"kind\":1", argument, kind, "argument operator"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_operator" && argument.string_value == "torch.ops.aten.relu.default", "argument operator", "operator classification changed");
+
+    if (parse_argument_case("{\"as_graph\":{}}", ",\"kind\":1", argument, kind, "argument graph"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_graph", "argument graph", "graph classification changed");
+
+    if (parse_argument_case("{\"as_optional_tensor\":{\"as_none\":true}}", ",\"kind\":1", argument, kind, "argument optional tensor"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_optional_tensor", "argument optional tensor", "optional tensor classification changed");
+
+    if (parse_argument_case("{\"as_optional_tensors\":[]}", ",\"kind\":1", argument, kind, "argument optional tensor list"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_optional_tensors", "argument optional tensor list", "optional tensor list classification changed");
+
+    if (parse_argument_case("{\"as_complex\":{\"real\":1.0,\"imag\":2.0}}", ",\"kind\":1", argument, kind, "argument complex"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_complex", "argument complex", "complex classification changed");
+
+    if (parse_argument_case("{\"as_nested_tensors\":[]}", ",\"kind\":1", argument, kind, "argument nested tensors"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_nested_tensors", "argument nested tensors", "nested tensors classification changed");
+
+    if (parse_argument_case("{\"as_int_lists\":[[1,2]]}", ",\"kind\":1", argument, kind, "argument int lists"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_int_lists", "argument int lists", "int lists classification changed");
+
+    if (parse_argument_case("{\"as_float_lists\":[[1.0,2.0]]}", ",\"kind\":1", argument, kind, "argument float lists"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_float_lists", "argument float lists", "float lists classification changed");
+
+    if (parse_argument_case("{\"as_string_to_argument\":{}}", ",\"kind\":1", argument, kind, "argument string map"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_string_to_argument", "argument string map", "string map classification changed");
+
+    ProgramFixture fixture;
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_future\":1},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg", "unknown argument tag as_future", "argument unknown tag");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_int\":1,\"as_bool\":true},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg", "argument union must contain exactly one tag", "argument multiple tags");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_ints\":[1,true]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_ints[1]", "expected integer", "argument list item type");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_int\":1},\"kind\":3}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].kind", "unknown argument kind", "argument invalid kind");
+}
+
+static void test_graph_signatures()
+{
+    ProgramFixture fixture;
+    fixture.graph_inputs = "[" + tensor_argument_json("p") + "," + tensor_argument_json("b") + "," + tensor_argument_json("c") + "," + tensor_argument_json("x") + "]";
+    fixture.tensor_values = "{\"p\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]")
+                            + ",\"b\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]")
+                            + ",\"c\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]")
+                            + ",\"x\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]")
+                            + ",\"y\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]") + "}";
+    fixture.input_specs = "[{\"parameter\":{\"arg\":{\"name\":\"p\"},\"parameter_name\":\"weight\"}},{\"buffer\":{\"arg\":{\"name\":\"b\"},\"buffer_name\":\"running\",\"persistent\":false}},{\"tensor_constant\":{\"arg\":{\"name\":\"c\"},\"tensor_constant_name\":\"constant\"}},{\"user_input\":{\"arg\":" + tensor_argument_json("x") + "}}]";
+
+    pnnx::ExportedProgram program;
+    if (parse_program_fixture(fixture, program, "signature state inputs"))
+    {
+        check(program.input_specs.size() == 4, "signature state inputs", "state input count changed");
+        if (program.input_specs.size() == 4)
+        {
+            check(program.input_specs[0].kind == pnnx::EXPORTED_PARAMETER && program.input_specs[0].target == "weight", "signature state inputs", "parameter changed");
+            check(program.input_specs[1].kind == pnnx::EXPORTED_BUFFER && program.input_specs[1].target == "running" && !program.input_specs[1].persistent, "signature state inputs", "buffer changed");
+            check(program.input_specs[2].kind == pnnx::EXPORTED_TENSOR_CONSTANT && program.input_specs[2].target == "constant", "signature state inputs", "tensor constant changed");
+            check(program.input_specs[3].kind == pnnx::EXPORTED_USER_INPUT && program.input_specs[3].arg.name == "x", "signature state inputs", "user input changed");
+        }
+    }
+
+    fixture = ProgramFixture();
+    fixture.graph_inputs = "[" + tensor_argument_json("x") + ",{\"as_int\":7}]";
+    fixture.input_specs = "[{\"user_input\":{\"arg\":" + tensor_argument_json("x") + "}},{\"constant_input\":{\"name\":\"n\",\"value\":{\"as_int\":7}}}]";
+    if (parse_program_fixture(fixture, program, "signature constant input"))
+        check(program.input_specs.size() == 2 && program.input_specs[1].kind == pnnx::EXPORTED_CONSTANT_INPUT && program.input_specs[1].arg.name == "n" && program.input_specs[1].arg.int_value == 7, "signature constant input", "constant input changed");
+
+    fixture = ProgramFixture();
+    fixture.graph_inputs = "[{\"as_custom_obj\":{\"name\":\"obj\",\"class_fqn\":\"pkg.Type\"}}]";
+    fixture.custom_obj_values = "{\"obj\":{\"name\":\"obj\",\"class_fqn\":\"pkg.Type\"}}";
+    fixture.input_specs = "[{\"custom_obj\":{\"arg\":{\"name\":\"obj\",\"class_fqn\":\"pkg.Type\"},\"custom_obj_name\":\"state.obj\"}}]";
+    if (parse_program_fixture(fixture, program, "signature custom object"))
+        check(program.input_specs.size() == 1 && program.input_specs[0].kind == pnnx::EXPORTED_CUSTOM_OBJ && program.input_specs[0].target == "state.obj" && program.graph.custom_obj_values.size() == 1, "signature custom object", "custom object input changed");
+
+    fixture = ProgramFixture();
+    fixture.graph_inputs = "[{\"as_none\":true}]";
+    fixture.input_specs = "[{\"token\":{\"arg\":{\"name\":\"token0\"}}}]";
+    if (parse_program_fixture(fixture, program, "signature token input"))
+        check(program.input_specs.size() == 1 && program.input_specs[0].kind == pnnx::EXPORTED_TOKEN && program.input_specs[0].arg.name == "token0", "signature token input", "token input changed");
+
+    fixture = ProgramFixture();
+    fixture.output_specs = "[{\"buffer_mutation\":{\"arg\":{\"name\":\"y\"},\"buffer_name\":\"running\"}}]";
+    if (parse_program_fixture(fixture, program, "signature buffer mutation"))
+        check(program.output_specs[0].kind == pnnx::EXPORTED_BUFFER_MUTATION && program.output_specs[0].target == "running", "signature buffer mutation", "buffer mutation changed");
+
+    fixture.output_specs = "[{\"parameter_mutation\":{\"arg\":{\"name\":\"y\"},\"parameter_name\":\"weight\"}}]";
+    if (parse_program_fixture(fixture, program, "signature parameter mutation"))
+        check(program.output_specs[0].kind == pnnx::EXPORTED_PARAMETER_MUTATION && program.output_specs[0].target == "weight", "signature parameter mutation", "parameter mutation changed");
+
+    fixture.output_specs = "[{\"gradient_to_parameter\":{\"arg\":{\"name\":\"y\"},\"parameter_name\":\"weight\"}}]";
+    if (parse_program_fixture(fixture, program, "signature parameter gradient"))
+        check(program.output_specs[0].kind == pnnx::EXPORTED_GRADIENT_TO_PARAMETER && program.output_specs[0].target == "weight", "signature parameter gradient", "parameter gradient changed");
+
+    fixture.output_specs = "[{\"gradient_to_user_input\":{\"arg\":{\"name\":\"y\"},\"user_input_name\":\"x\"}}]";
+    if (parse_program_fixture(fixture, program, "signature user input gradient"))
+        check(program.output_specs[0].kind == pnnx::EXPORTED_GRADIENT_TO_USER_INPUT && program.output_specs[0].target == "x", "signature user input gradient", "user input gradient changed");
+
+    fixture.output_specs = "[{\"user_input_mutation\":{\"arg\":{\"name\":\"y\"},\"user_input_name\":\"x\"}}]";
+    if (parse_program_fixture(fixture, program, "signature user input mutation"))
+        check(program.output_specs[0].kind == pnnx::EXPORTED_USER_INPUT_MUTATION && program.output_specs[0].target == "x", "signature user input mutation", "user input mutation changed");
+
+    fixture.output_specs = "[{\"loss_output\":{\"arg\":{\"name\":\"y\"}}}]";
+    if (parse_program_fixture(fixture, program, "signature loss output"))
+        check(program.output_specs[0].kind == pnnx::EXPORTED_LOSS_OUTPUT && program.output_specs[0].arg.name == "y", "signature loss output", "loss output changed");
+
+    fixture.output_specs = "[{\"token\":{\"arg\":{\"name\":\"token1\"}}}]";
+    if (parse_program_fixture(fixture, program, "signature token output"))
+        check(program.output_specs[0].kind == pnnx::EXPORTED_OUTPUT_TOKEN && program.output_specs[0].arg.name == "token1", "signature token output", "token output changed");
+}
+
+static void test_program_errors()
+{
+    ProgramFixture fixture;
+    fixture.graph_inputs = "[" + tensor_argument_json("missing") + "]";
+    expect_program_error(fixture, "$.graph_module.graph.tensor_values.missing", "missing tensor metadata", "program missing tensor value");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.cat.default\",\"inputs\":[{\"name\":\"tensors\",\"arg\":{\"as_tensors\":[{\"name\":\"x\"},{\"name\":\"missing\"}]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.tensor_values.missing", "missing tensor metadata", "program tensor list missing value");
+
+    fixture = ProgramFixture();
+    fixture.sym_int_values = "{\"s0\":{\"as_int\":2}}";
+    expect_program_error(fixture, "$.graph_module.graph.sym_int_values", "dynamic symbolic values are unsupported", "program sym int values");
+
+    fixture = ProgramFixture();
+    fixture.sym_bool_values = "{\"b0\":{\"as_bool\":true}}";
+    expect_program_error(fixture, "$.graph_module.graph.sym_bool_values", "dynamic symbolic values are unsupported", "program sym bool values");
+
+    fixture = ProgramFixture();
+    fixture.sym_float_values = "{\"f0\":{\"as_float\":1.0}}";
+    expect_program_error(fixture, "$.graph_module.graph.sym_float_values", "dynamic symbolic values are unsupported", "program sym float values");
+
+    fixture = ProgramFixture();
+    fixture.range_constraints = "{\"s0\":{\"min_val\":1,\"max_val\":8}}";
+    expect_program_error(fixture, "$.range_constraints", "dynamic range constraints are unsupported", "program range constraints");
+
+    fixture = ProgramFixture();
+    fixture.is_single_tensor_return = "true";
+    expect_program_error(fixture, "$.graph_module.graph.is_single_tensor_return", "higher-order single tensor graph is unsupported", "program single tensor return");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = "{}";
+    expect_program_error(fixture, "$.graph_module.module_call_graph", "expected array", "program module call graph type");
+
+    fixture = ProgramFixture();
+    fixture.input_specs = "[{\"future_input\":{}}]";
+    expect_program_error(fixture, "$.graph_module.signature.input_specs[0]", "unknown input spec tag future_input", "program unknown input spec");
+
+    fixture = ProgramFixture();
+    fixture.input_specs = "[{\"user_input\":{\"arg\":" + tensor_argument_json("x") + "},\"token\":{\"arg\":{\"name\":\"t\"}}}]";
+    expect_program_error(fixture, "$.graph_module.signature.input_specs[0]", "input spec union must contain exactly one tag", "program multiple input spec tags");
+
+    fixture = ProgramFixture();
+    fixture.output_specs = "[{\"future_output\":{}}]";
+    expect_program_error(fixture, "$.graph_module.signature.output_specs[0]", "unknown output spec tag future_output", "program unknown output spec");
+
+    fixture = ProgramFixture();
+    fixture.output_specs = "[{\"user_output\":{\"arg\":" + tensor_argument_json("y") + "},\"loss_output\":{\"arg\":{\"name\":\"y\"}}}]";
+    expect_program_error(fixture, "$.graph_module.signature.output_specs[0]", "output spec union must contain exactly one tag", "program multiple output spec tags");
+
+    fixture = ProgramFixture();
+    fixture.input_specs = "[]";
+    expect_program_error(fixture, "$.graph_module.signature.input_specs", "input spec count does not match graph inputs", "program input spec count");
+
+    fixture = ProgramFixture();
+    fixture.input_specs = "[{\"user_input\":{\"arg\":" + tensor_argument_json("signature_missing") + "}}]";
+    expect_program_error(fixture, "$.graph_module.graph.tensor_values.signature_missing", "missing tensor metadata", "program signature missing tensor value");
+
+    fixture = ProgramFixture();
+    fixture.output_specs = "[]";
+    expect_program_error(fixture, "$.graph_module.signature.output_specs", "output spec count does not match graph outputs", "program output spec count");
+
+    fixture = ProgramFixture();
+    fixture.schema_minor = "14";
+    fixture.torch_version = "2.9.0";
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.relu.default\",\"inputs\":[],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null}]";
+    pnnx::ExportedProgram program;
+    if (parse_program_fixture(fixture, program, "program schema 8.14 node without name"))
+        check(program.graph.nodes.size() == 1 && !program.graph.nodes[0].has_name && program.graph.nodes[0].name.empty(), "program schema 8.14 node without name", "missing node name changed");
+}
+
 static std::string join_ints(const std::vector<int64_t>& values)
 {
     std::ostringstream text;
@@ -421,7 +840,71 @@ static void print_payload_config(const char* config_name, const pnnx::ExportedPa
     }
 }
 
-static int inspect_package(const std::string& path)
+static const char* input_kind_name(pnnx::ExportedInputKind kind)
+{
+    if (kind == pnnx::EXPORTED_USER_INPUT)
+        return "user_input";
+    if (kind == pnnx::EXPORTED_PARAMETER)
+        return "parameter";
+    if (kind == pnnx::EXPORTED_BUFFER)
+        return "buffer";
+    if (kind == pnnx::EXPORTED_TENSOR_CONSTANT)
+        return "tensor_constant";
+    if (kind == pnnx::EXPORTED_CONSTANT_INPUT)
+        return "constant_input";
+    if (kind == pnnx::EXPORTED_CUSTOM_OBJ)
+        return "custom_obj";
+    return "token";
+}
+
+static const char* output_kind_name(pnnx::ExportedOutputKind kind)
+{
+    if (kind == pnnx::EXPORTED_USER_OUTPUT)
+        return "user_output";
+    if (kind == pnnx::EXPORTED_LOSS_OUTPUT)
+        return "loss_output";
+    if (kind == pnnx::EXPORTED_BUFFER_MUTATION)
+        return "buffer_mutation";
+    if (kind == pnnx::EXPORTED_PARAMETER_MUTATION)
+        return "parameter_mutation";
+    if (kind == pnnx::EXPORTED_GRADIENT_TO_PARAMETER)
+        return "gradient_to_parameter";
+    if (kind == pnnx::EXPORTED_GRADIENT_TO_USER_INPUT)
+        return "gradient_to_user_input";
+    if (kind == pnnx::EXPORTED_USER_INPUT_MUTATION)
+        return "user_input_mutation";
+    return "token";
+}
+
+static void print_graph(const pnnx::ExportedProgram& program)
+{
+    fprintf(stdout, "graph|%llu|%llu|%llu|%llu|%llu|%llu|%llu\n",
+            (unsigned long long)program.graph.inputs.size(),
+            (unsigned long long)program.graph.nodes.size(),
+            (unsigned long long)program.graph.outputs.size(),
+            (unsigned long long)program.graph.tensor_values.size(),
+            (unsigned long long)program.graph.custom_obj_values.size(),
+            (unsigned long long)program.input_specs.size(),
+            (unsigned long long)program.output_specs.size());
+
+    for (size_t i = 0; i < program.input_specs.size(); i++)
+    {
+        const pnnx::ExportedInputSpec& spec = program.input_specs[i];
+        fprintf(stdout, "input|%s|%s|%s|%d\n", input_kind_name(spec.kind), spec.arg.name.c_str(), spec.target.c_str(), spec.persistent ? 1 : 0);
+    }
+    for (size_t i = 0; i < program.graph.nodes.size(); i++)
+    {
+        const pnnx::ExportedNode& node = program.graph.nodes[i];
+        fprintf(stdout, "node|%s|%s|%llu|%llu\n", node.name.c_str(), node.target.c_str(), (unsigned long long)node.inputs.size(), (unsigned long long)node.outputs.size());
+    }
+    for (size_t i = 0; i < program.output_specs.size(); i++)
+    {
+        const pnnx::ExportedOutputSpec& spec = program.output_specs[i];
+        fprintf(stdout, "output|%s|%s|%s\n", output_kind_name(spec.kind), spec.arg.name.c_str(), spec.target.c_str());
+    }
+}
+
+static int inspect_package(const std::string& path, bool print_graph_details)
 {
     pnnx::Pt2ArchiveReader reader;
     std::string archive_error;
@@ -442,11 +925,11 @@ static int inspect_package(const std::string& path)
         return 1;
     }
 
-    pnnx::ExportedProgramHeader header;
+    pnnx::ExportedProgram program;
     pnnx::ExportedPayloadConfig weights;
     pnnx::ExportedPayloadConfig constants;
     pnnx::ExportedSchemaError schema_error;
-    if (pnnx::parse_exported_program_header(model_json, header, schema_error) != 0
+    if (pnnx::parse_exported_program(model_json, program, schema_error) != 0
         || pnnx::parse_exported_payload_config(weights_json, weights, schema_error) != 0
         || pnnx::parse_exported_payload_config(constants_json, constants, schema_error) != 0)
     {
@@ -455,12 +938,15 @@ static int inspect_package(const std::string& path)
     }
 
     fprintf(stdout, "header|%d|%d|%s|%lld|%llu|%llu\n",
-            header.schema_major,
-            header.schema_minor,
-            header.torch_version.c_str(),
-            (long long)header.opset_version.find("aten")->second,
+            program.header.schema_major,
+            program.header.schema_minor,
+            program.header.torch_version.c_str(),
+            (long long)program.header.opset_version.find("aten")->second,
             (unsigned long long)weights.entries.size(),
             (unsigned long long)constants.entries.size());
+
+    if (print_graph_details)
+        print_graph(program);
 
     print_payload_config("weights", weights);
     print_payload_config("constants", constants);
@@ -471,13 +957,19 @@ static int inspect_package(const std::string& path)
 int main(int argc, char** argv)
 {
     if (argc == 3 && std::string(argv[1]) == "inspect")
-        return inspect_package(argv[2]);
+        return inspect_package(argv[2], false);
+    if (argc == 3 && std::string(argv[1]) == "inspect-graph")
+        return inspect_package(argv[2], true);
     if (argc != 1)
         return 2;
 
     test_headers();
     test_tensor_meta();
     test_payload_config();
+    test_tiny_program();
+    test_graph_arguments();
+    test_graph_signatures();
+    test_program_errors();
 
     if (test_failures != 0)
     {
