@@ -65,6 +65,11 @@ jobs:
         cd tools/pnnx
         cd build && ctest -C Release --output-on-failure -R test_nn_Conv
 
+    - name: exported-program-smoke-test
+      run: |
+        cd tools/pnnx/build
+        ctest -C Release --output-on-failure -R "test_(storezip|model_format|json_reader|pt2_archive|exported_program)$"
+
   build:
     runs-on: [self-hosted, linux, ubuntu25]
 
@@ -229,7 +234,9 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: pnnx
-        path: tools/pnnx/build/src/pnnx
+        path: |
+          tools/pnnx/build/src/pnnx
+          tools/pnnx/build/tests/pnnx_test_*
         compression-level: 9
 
   test:
@@ -354,18 +361,40 @@ jobs:
       uses: actions/download-artifact@v8
       with:
         name: pnnx
-        path: tools/pnnx/build/src
+        path: tools/pnnx/build
 
     - name: test
       run: |
         export PATH=${{ env.PYTHONUSERBASE }}/bin:$PATH
-        chmod +x tools/pnnx/build/src/pnnx
+        chmod +x tools/pnnx/build/src/pnnx tools/pnnx/build/tests/pnnx_test_*
         export OMP_THREAD_LIMIT=1
         export OMP_NUM_THREADS=1
         export MKL_NUM_THREADS=1
         export MKL_ENABLE_INSTRUCTIONS=SSE4_2
         cd tools/pnnx/build
-        ctest --output-on-failure -j 8
+        ctest --output-on-failure -j 8 -E "^(test_pt2_.*|test_exported_program.*)$"
+
+    - name: exported-program-version-test
+      if: matrix.torch == '2.8.0' || matrix.torch == '2.9.0' || matrix.torch == '2.10.0' || matrix.torch == '2.11.0' || matrix.torch == '2.12.1'
+      run: |
+        export PATH=${{ env.PYTHONUSERBASE }}/bin:$PATH
+        export OMP_THREAD_LIMIT=1
+        export OMP_NUM_THREADS=1
+        export MKL_NUM_THREADS=1
+        export MKL_ENABLE_INSTRUCTIONS=SSE4_2
+        cd tools/pnnx/build
+        ctest --output-on-failure -R "^test_pt2_version_compatibility$"
+
+    - name: exported-program-test
+      if: matrix.torch == '2.12.1'
+      run: |
+        export PATH=${{ env.PYTHONUSERBASE }}/bin:$PATH
+        export OMP_THREAD_LIMIT=1
+        export OMP_NUM_THREADS=1
+        export MKL_NUM_THREADS=1
+        export MKL_ENABLE_INSTRUCTIONS=SSE4_2
+        cd tools/pnnx/build
+        ctest --output-on-failure -j 8 -R "^(test_pt2_.*|test_exported_program.*)$" -E "^test_pt2_version_compatibility$"
 
     - name: python-pnnx
       run: |
