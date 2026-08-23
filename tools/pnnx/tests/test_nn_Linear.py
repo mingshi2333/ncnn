@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from packaging import version
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -47,23 +49,23 @@ def test():
 
     a = net(x, y, z)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, y, z))
-    mod.save("test_nn_Linear.pt")
+    mod = convert_and_import(
+        net,
+        (x, y, z),
+        "test_nn_Linear",
+        pnnx_args=("inputshape=[1,64],[12,64],[1,3,12,64]",),
+    )
+    if mod is None:
+        return True
 
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_nn_Linear.pt inputshape=[1,64],[12,64],[1,3,12,64]")
+    b = mod.test_inference()
 
-    # pnnx inference
-    import test_nn_Linear_pnnx
-    b = test_nn_Linear_pnnx.test_inference()
-
+    passed = True
     for a0, b0 in zip(a, b):
         b0 = b0.reshape_as(a0)
         if not torch.allclose(a0, b0, 1e-3, 1e-3):
-            return False
-    return True
+            passed = False
+    return check_numerical_result("test_nn_Linear", passed)
 
 if __name__ == "__main__":
     if test():
