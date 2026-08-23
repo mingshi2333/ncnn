@@ -10,6 +10,7 @@
 #include <locale>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace pnnx {
 
@@ -141,6 +142,8 @@ private:
 
     bool parse_value(JsonValue& value, size_t depth)
     {
+        if (position_ == size_)
+            return fail(position_, "expected json value");
         if (depth > options_.max_depth)
             return fail(position_, "json depth limit exceeded");
         if (node_count_ >= options_.max_nodes)
@@ -160,9 +163,9 @@ private:
         if (ch == '-' || (ch >= '0' && ch <= '9'))
             return parse_number(value);
         if (ch == '[')
-            return fail(position_, "json array is not supported");
+            return parse_array(value, depth);
         if (ch == '{')
-            return fail(position_, "json object is not supported");
+            return parse_object(value, depth);
 
         return fail(position_, "expected json value");
     }
@@ -179,12 +182,148 @@ private:
         return true;
     }
 
-    bool append_string_character(std::string& text, char ch, size_t character_offset)
+    bool append_string_bytes(std::string& text, const char* bytes, size_t byte_count, size_t character_offset)
     {
-        if (text.size() >= options_.max_string_length)
+        if (text.size() > options_.max_string_length || byte_count > options_.max_string_length - text.size())
             return fail(character_offset, "json string length limit exceeded");
 
-        text.push_back(ch);
+        text.append(bytes, byte_count);
+        return true;
+    }
+
+    bool append_string_character(std::string& text, char ch, size_t character_offset)
+    {
+        return append_string_bytes(text, &ch, 1, character_offset);
+    }
+
+    bool append_utf8_code_point(std::string& text, uint32_t code_point, size_t character_offset)
+    {
+        char bytes[4];
+        size_t byte_count = 0;
+        if (code_point <= 0x7f)
+        {
+            bytes[0] = (char)code_point;
+            byte_count = 1;
+        }
+        else if (code_point <= 0x7ff)
+        {
+            bytes[0] = (char)(0xc0 | (code_point >> 6));
+            bytes[1] = (char)(0x80 | (code_point & 0x3f));
+            byte_count = 2;
+        }
+        else if (code_point >= 0xd800 && code_point <= 0xdfff)
+        {
+            return fail(character_offset, "unicode surrogate code point is invalid");
+        }
+        else if (code_point <= 0xffff)
+        {
+            bytes[0] = (char)(0xe0 | (code_point >> 12));
+            bytes[1] = (char)(0x80 | ((code_point >> 6) & 0x3f));
+            bytes[2] = (char)(0x80 | (code_point & 0x3f));
+            byte_count = 3;
+        }
+        else if (code_point <= 0x10ffff)
+        {
+            bytes[0] = (char)(0xf0 | (code_point >> 18));
+            bytes[1] = (char)(0x80 | ((code_point >> 12) & 0x3f));
+            bytes[2] = (char)(0x80 | ((code_point >> 6) & 0x3f));
+            bytes[3] = (char)(0x80 | (code_point & 0x3f));
+            byte_count = 4;
+        }
+        else
+        {
+            return fail(character_offset, "unicode code point out of range");
+        }
+
+        return append_string_bytes(text, bytes, byte_count, character_offset);
+    }
+
+    static int hex_digit(char ch)
+    {
+        if (ch >= '0' && ch <= '9')
+            return ch - '0';
+        if (ch >= 'a' && ch <= 'f')
+            return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F')
+            return ch - 'A' + 10;
+
+        return -1;
+    }
+
+    bool parse_unicode_quad(uint16_t& code_unit)
+    {
+        uint16_t value = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            if (position_ == size_)
+                return fail(position_, "incomplete unicode escape");
+
+            const int digit = hex_digit(data_[position_]);
+            if (digit < 0)
+                return fail(position_, "invalid unicode escape");
+
+            value = (uint16_t)(value * 16 + digit);
+            position_++;
+        }
+
+        code_unit = value;
+        return true;
+    }
+
+    bool parse_raw_utf8(std::string& text)
+    {
+        const size_t sequence_offset = position_;
+        const unsigned char leading_byte = (unsigned char)data_[sequence_offset];
+
+        size_t sequence_length = 0;
+        uint32_t code_point = 0;
+        uint32_t minimum_code_point = 0;
+        if (leading_byte >= 0xc2 && leading_byte <= 0xdf)
+        {
+            sequence_length = 2;
+            code_point = leading_byte & 0x1f;
+            minimum_code_point = 0x80;
+        }
+        else if (leading_byte >= 0xe0 && leading_byte <= 0xef)
+        {
+            sequence_length = 3;
+            code_point = leading_byte & 0x0f;
+            minimum_code_point = 0x800;
+        }
+        else if (leading_byte >= 0xf0 && leading_byte <= 0xf4)
+        {
+            sequence_length = 4;
+            code_point = leading_byte & 0x07;
+            minimum_code_point = 0x10000;
+        }
+        else
+        {
+            return fail(sequence_offset, "invalid utf-8 leading byte in json string");
+        }
+
+        if (sequence_length > size_ - sequence_offset)
+            return fail(size_, "truncated utf-8 sequence in json string");
+
+        for (size_t i = 1; i < sequence_length; i++)
+        {
+            const unsigned char continuation_byte = (unsigned char)data_[sequence_offset + i];
+            if ((continuation_byte & 0xc0) != 0x80)
+                return fail(sequence_offset + i, "invalid utf-8 continuation byte in json string");
+
+            code_point = (code_point << 6) | (continuation_byte & 0x3f);
+        }
+
+        if (code_point < minimum_code_point)
+            return fail(sequence_offset, "overlong utf-8 sequence in json string");
+        if (code_point >= 0xd800 && code_point <= 0xdfff)
+            return fail(sequence_offset, "utf-8 surrogate code point in json string");
+        if (code_point > 0x10ffff)
+            return fail(sequence_offset, "utf-8 code point out of range");
+
+        if (!append_string_bytes(text, data_ + sequence_offset, sequence_length, sequence_offset))
+            return false;
+
+        position_ += sequence_length;
         return true;
     }
 
@@ -196,10 +335,11 @@ private:
         while (position_ < size_)
         {
             const size_t character_offset = position_;
-            const unsigned char ch = (unsigned char)data_[position_++];
+            const unsigned char ch = (unsigned char)data_[position_];
 
             if (ch == '"')
             {
+                position_++;
                 value.type_ = JSON_STRING;
                 value.string_value_.swap(text);
                 return true;
@@ -208,7 +348,13 @@ private:
             if (ch < 0x20)
                 return fail(character_offset, "control character in json string");
             if (ch >= 0x80)
-                return fail(character_offset, "non-ascii json string byte is not supported");
+            {
+                if (!parse_raw_utf8(text))
+                    return false;
+                continue;
+            }
+
+            position_++;
 
             if (ch != '\\')
             {
@@ -236,7 +382,36 @@ private:
             else if (escape == 't')
                 decoded = '\t';
             else if (escape == 'u')
-                return fail(escape_offset, "json unicode escape is not supported");
+            {
+                uint16_t first_code_unit = 0;
+                if (!parse_unicode_quad(first_code_unit))
+                    return false;
+
+                uint32_t code_point = first_code_unit;
+                if (first_code_unit >= 0xd800 && first_code_unit <= 0xdbff)
+                {
+                    if (size_ - position_ < 2 || data_[position_] != '\\' || data_[position_ + 1] != 'u')
+                        return fail(position_, "unpaired high surrogate");
+
+                    position_ += 2;
+                    const size_t low_surrogate_offset = position_ - 1;
+                    uint16_t second_code_unit = 0;
+                    if (!parse_unicode_quad(second_code_unit))
+                        return false;
+                    if (second_code_unit < 0xdc00 || second_code_unit > 0xdfff)
+                        return fail(low_surrogate_offset, "invalid low surrogate");
+
+                    code_point = 0x10000 + (((uint32_t)first_code_unit - 0xd800) << 10) + ((uint32_t)second_code_unit - 0xdc00);
+                }
+                else if (first_code_unit >= 0xdc00 && first_code_unit <= 0xdfff)
+                {
+                    return fail(escape_offset, "unpaired low surrogate");
+                }
+
+                if (!append_utf8_code_point(text, code_point, escape_offset))
+                    return false;
+                continue;
+            }
             else
                 return fail(escape_offset, "invalid escape in json string");
 
@@ -245,6 +420,107 @@ private:
         }
 
         return fail(position_, "unterminated string");
+    }
+
+    bool parse_array(JsonValue& value, size_t depth)
+    {
+        value.type_ = JSON_ARRAY;
+        value.array_value_.clear();
+        position_++;
+        skip_whitespace();
+
+        if (position_ == size_)
+            return fail(position_, "unterminated array");
+        if (data_[position_] == ']')
+        {
+            position_++;
+            return true;
+        }
+
+        while (true)
+        {
+            JsonValue element;
+            if (!parse_value(element, depth + 1))
+                return false;
+            value.array_value_.push_back(std::move(element));
+
+            skip_whitespace();
+            if (position_ == size_)
+                return fail(position_, "unterminated array");
+            if (data_[position_] == ']')
+            {
+                position_++;
+                return true;
+            }
+            if (data_[position_] != ',')
+                return fail(position_, "expected comma or closing bracket in json array");
+
+            position_++;
+            skip_whitespace();
+            if (position_ == size_)
+                return fail(position_, "unterminated array");
+            if (data_[position_] == ']')
+                return fail(position_, "trailing comma in json array");
+        }
+    }
+
+    bool parse_object(JsonValue& value, size_t depth)
+    {
+        value.type_ = JSON_OBJECT;
+        value.object_value_.clear();
+        position_++;
+        skip_whitespace();
+
+        if (position_ == size_)
+            return fail(position_, "unterminated object");
+        if (data_[position_] == '}')
+        {
+            position_++;
+            return true;
+        }
+
+        while (true)
+        {
+            if (data_[position_] != '"')
+                return fail(position_, "expected object key string");
+
+            JsonValue key_value;
+            if (!parse_string(key_value))
+                return false;
+            std::string key;
+            key.swap(key_value.string_value_);
+            if (value.object_value_.find(key) != value.object_value_.end())
+                return fail(position_, "duplicate key " + key);
+
+            skip_whitespace();
+            if (position_ == size_ || data_[position_] != ':')
+                return fail(position_, "expected colon after json object key");
+
+            position_++;
+            skip_whitespace();
+            JsonValue member;
+            if (!parse_value(member, depth + 1))
+                return false;
+            value.object_value_.insert(std::make_pair(std::move(key), std::move(member)));
+
+            skip_whitespace();
+            if (position_ == size_)
+                return fail(position_, "unterminated object");
+            if (data_[position_] == '}')
+            {
+                position_++;
+                return true;
+            }
+            if (data_[position_] != ',')
+                return fail(position_, "expected comma or closing brace in json object");
+
+            position_++;
+            skip_whitespace();
+            if (position_ == size_)
+                return fail(position_, "unterminated object");
+            if (data_[position_] == '}')
+                return fail(position_, "trailing comma in json object");
+        }
     }
 
     bool parse_number(JsonValue& value)
