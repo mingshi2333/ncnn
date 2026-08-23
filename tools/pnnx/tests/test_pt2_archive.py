@@ -172,6 +172,22 @@ class Pt2ArchiveTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b"random-root/data/constants/model_constants_config.json is missing", result.stderr)
 
+    def test_rejects_legacy_pickled_payload_layout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            entries = valid_entries()
+            del entries["random-root/data/weights/model_weights_config.json"]
+            del entries["random-root/data/constants/model_constants_config.json"]
+            entries["random-root/data/weights/model.pt"] = b"legacy-weights"
+            entries["random-root/data/constants/model.pt"] = b"legacy-constants"
+            archive_path = self.write_fixture(temp_dir, entries)
+            result = run_helper("inspect", archive_path)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                b"PyTorch 2.8 legacy pickled-payload PT2 is unsupported",
+                result.stderr,
+            )
+
     def test_rejects_any_compressed_pt2_entry(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             entries = valid_entries()

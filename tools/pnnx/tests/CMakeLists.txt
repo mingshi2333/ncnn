@@ -154,6 +154,11 @@ add_test(
 )
 
 add_test(
+    NAME test_pt2_version_compatibility
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_pt2_version_compatibility.py $<TARGET_FILE:pnnx> $<TARGET_FILE:pnnx_test_exported_program_operator>
+)
+
+add_test(
     NAME test_pt2_manifest
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_pt2_manifest.py
 )

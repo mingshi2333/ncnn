@@ -198,6 +198,7 @@ struct TorchProducerVersion
 {
     int major;
     int minor;
+    int patch;
 };
 
 struct VersionCursor
@@ -244,14 +245,15 @@ static bool parse_torch_version(const std::string& text, TorchProducerVersion& v
     if (!parse_version_component(cursor, version.minor))
         return false;
 
+    version.patch = 0;
+
     if (cursor.position == text.size())
         return true;
 
     if (text[cursor.position] == '.')
     {
         cursor.position++;
-        int patch = 0;
-        if (!parse_version_component(cursor, patch))
+        if (!parse_version_component(cursor, version.patch))
             return false;
     }
     else if (text[cursor.position] == '+' || text[cursor.position] == '-')
@@ -343,7 +345,7 @@ int parse_exported_program_header(const JsonValue& value, ExportedProgramHeader&
         return schema_error(error, "$.torch_version", "legacy exported program producer is unsupported");
     if (torch_version_value.major == 2 && torch_version_value.minor == 8)
         return schema_error(error, "$.torch_version", "PyTorch 2.8 legacy pickled-payload PT2 is unsupported");
-    if (torch_version_value.major != 2 || torch_version_value.minor > 12)
+    if (torch_version_value.major != 2 || torch_version_value.minor > 12 || (torch_version_value.minor == 12 && torch_version_value.patch > 1))
         return schema_error(error, "$.torch_version", "untested torch producer version");
 
     if (parsed_header.schema_major != 8)

@@ -195,7 +195,16 @@ int Pt2ArchiveReader::open(const std::string& path, std::string& error)
     const std::string model_name = model_filename.substr(0, model_filename.size() - 5);
     const std::string weights_config_path = root_prefix + "data/weights/" + model_name + "_weights_config.json";
     const std::string constants_config_path = root_prefix + "data/constants/" + model_name + "_constants_config.json";
+    const std::string legacy_weights_path = root_prefix + "data/weights/" + model_name + ".pt";
+    const std::string legacy_constants_path = root_prefix + "data/constants/" + model_name + ".pt";
     const std::string byteorder_path = root_prefix + "byteorder";
+
+    if (!reader.has_file(weights_config_path) && !reader.has_file(constants_config_path) && reader.has_file(legacy_weights_path) && reader.has_file(legacy_constants_path))
+    {
+        error = "PyTorch 2.8 legacy pickled-payload PT2 is unsupported";
+        reset();
+        return -1;
+    }
 
     if (!reader.has_file(weights_config_path))
     {

@@ -249,6 +249,7 @@ static void test_headers()
     expect_header_error(header_json(8, 8, "2.8.0"), "$.torch_version", "legacy pickled-payload", "header legacy 2.8");
     expect_header_error(header_json(8, 7, "2.7.1"), "$.torch_version", "legacy exported program producer", "header legacy 2.7");
     expect_header_error(header_json(8, 21, "2.13.0"), "$.torch_version", "untested torch producer", "header future producer");
+    expect_header_error(header_json(8, 20, "2.12.2"), "$.torch_version", "untested torch producer", "header future patch");
     expect_header_error(header_json(9, 1, "2.12.1"), "$.schema_version.major", "incompatible schema major", "header schema major");
     expect_header_error(header_json(8, 17, "2.12.1"), "$.schema_version.minor", "does not match torch producer", "header schema producer mismatch");
     expect_header_error(header_json(8, 20, "v2.12.1"), "$.torch_version", "invalid torch producer version", "header version prefix");
