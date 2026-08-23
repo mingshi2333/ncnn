@@ -1,12 +1,12 @@
 # Copyright 2026 Tencent
 # SPDX-License-Identifier: BSD-3-Clause
 
-import os
-
 import numpy as np
 import torch
 import torch.nn as nn
 from packaging import version
+
+from pnnx_test_utils import check_numerical_result, convert_and_import
 
 
 def _allclose(a, b):
@@ -43,15 +43,18 @@ def _test_basic():
 
     a = net(x, y)
 
-    mod = torch.jit.trace(net, (x, y))
-    mod.save("test_pnnx_input_npy_basic.pt")
+    mod = convert_and_import(
+        net,
+        (x, y),
+        "test_pnnx_input_npy",
+        pnnx_args=("input=test_pnnx_input_npy_basic_x.npy,test_pnnx_input_npy_basic_y.npy",),
+        output_basename="test_pnnx_input_npy_basic",
+        defer_success_validation=True,
+    )
+    if mod is None:
+        return None
 
-    ret = os.system("../src/pnnx test_pnnx_input_npy_basic.pt input=test_pnnx_input_npy_basic_x.npy,test_pnnx_input_npy_basic_y.npy")
-    if ret != 0:
-        return False
-
-    import test_pnnx_input_npy_basic_pnnx
-    pnnx_net = test_pnnx_input_npy_basic_pnnx.Model()
+    pnnx_net = mod.Model()
     pnnx_net.eval()
     b = pnnx_net(x, y)
 
@@ -94,18 +97,22 @@ def _test_input2():
     a0 = net(x0, y0)
     a1 = net(x1, y1)
 
-    if version.parse(torch.__version__) < version.parse("2.0"):
-        mod = torch.jit.trace(net, (x0, y0))
-    else:
-        mod = torch.jit.trace(net, (x0, y0), _store_inputs=False)
-    mod.save("test_pnnx_input_npy_input2.pt")
+    mod = convert_and_import(
+        net,
+        (x0, y0),
+        "test_pnnx_input_npy",
+        pnnx_args=(
+            "input=test_pnnx_input_npy_input2_x0.npy,test_pnnx_input_npy_input2_y0.npy",
+            "input2=test_pnnx_input_npy_input2_x1.npy,test_pnnx_input_npy_input2_y1.npy",
+        ),
+        trace_kwargs={"_store_inputs": False} if version.parse(torch.__version__) >= version.parse("2.0") else {},
+        output_basename="test_pnnx_input_npy_input2",
+        defer_success_validation=True,
+    )
+    if mod is None:
+        return None
 
-    ret = os.system("../src/pnnx test_pnnx_input_npy_input2.pt input=test_pnnx_input_npy_input2_x0.npy,test_pnnx_input_npy_input2_y0.npy input2=test_pnnx_input_npy_input2_x1.npy,test_pnnx_input_npy_input2_y1.npy")
-    if ret != 0:
-        return False
-
-    import test_pnnx_input_npy_input2_pnnx
-    pnnx_net = test_pnnx_input_npy_input2_pnnx.Model()
+    pnnx_net = mod.Model()
     pnnx_net.eval()
     b0 = pnnx_net(x0, y0)
     b1 = pnnx_net(x1, y1)
@@ -138,15 +145,18 @@ def _test_int64():
 
     a = net(x, y)
 
-    mod = torch.jit.trace(net, (x, y))
-    mod.save("test_pnnx_input_npy_int64.pt")
+    mod = convert_and_import(
+        net,
+        (x, y),
+        "test_pnnx_input_npy",
+        pnnx_args=("input=test_pnnx_input_npy_int64_x.npy,test_pnnx_input_npy_int64_y.npy",),
+        output_basename="test_pnnx_input_npy_int64",
+        defer_success_validation=True,
+    )
+    if mod is None:
+        return None
 
-    ret = os.system("../src/pnnx test_pnnx_input_npy_int64.pt input=test_pnnx_input_npy_int64_x.npy,test_pnnx_input_npy_int64_y.npy")
-    if ret != 0:
-        return False
-
-    import test_pnnx_input_npy_int64_pnnx
-    pnnx_net = test_pnnx_input_npy_int64_pnnx.Model()
+    pnnx_net = mod.Model()
     pnnx_net.eval()
     b = pnnx_net(x, y)
 
@@ -177,15 +187,18 @@ def _test_embedding():
 
     a = net(x)
 
-    mod = torch.jit.trace(net, x)
-    mod.save("test_pnnx_input_npy_embedding.pt")
+    mod = convert_and_import(
+        net,
+        (x,),
+        "test_pnnx_input_npy",
+        pnnx_args=("input=test_pnnx_input_npy_embedding_x.npy",),
+        output_basename="test_pnnx_input_npy_embedding",
+        defer_success_validation=True,
+    )
+    if mod is None:
+        return None
 
-    ret = os.system("../src/pnnx test_pnnx_input_npy_embedding.pt input=test_pnnx_input_npy_embedding_x.npy")
-    if ret != 0:
-        return False
-
-    import test_pnnx_input_npy_embedding_pnnx
-    pnnx_net = test_pnnx_input_npy_embedding_pnnx.Model()
+    pnnx_net = mod.Model()
     pnnx_net.eval()
     b = pnnx_net(x)
 
@@ -193,7 +206,13 @@ def _test_embedding():
 
 
 def test():
-    return _test_basic() and _test_input2() and _test_int64() and _test_embedding()
+    for test_case in (_test_basic, _test_input2, _test_int64, _test_embedding):
+        result = test_case()
+        if result is None:
+            return True
+        if not result:
+            return check_numerical_result("test_pnnx_input_npy", False)
+    return check_numerical_result("test_pnnx_input_npy", True)
 
 
 if __name__ == "__main__":

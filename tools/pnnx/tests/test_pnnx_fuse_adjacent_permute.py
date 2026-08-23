@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -26,22 +28,20 @@ def test():
 
     a = net(x, y, z)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, y, z))
-    mod.save("test_pnnx_fuse_adjacent_permute.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_pnnx_fuse_adjacent_permute.pt inputshape=[8,9,10],[9,10,11,12],[1,9,10,11,12]")
-
-    # pnnx inference
-    import test_pnnx_fuse_adjacent_permute_pnnx
-    b = test_pnnx_fuse_adjacent_permute_pnnx.test_inference()
+    mod = convert_and_import(
+        net,
+        (x, y, z),
+        "test_pnnx_fuse_adjacent_permute",
+        pnnx_args=("inputshape=[8,9,10],[9,10,11,12],[1,9,10,11,12]",),
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.equal(a0, b0):
-            return False
-    return True
+            return check_numerical_result("test_pnnx_fuse_adjacent_permute", False)
+    return check_numerical_result("test_pnnx_fuse_adjacent_permute", True)
 
 if __name__ == "__main__":
     if test():

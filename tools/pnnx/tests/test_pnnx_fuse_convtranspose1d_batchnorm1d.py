@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -55,19 +57,17 @@ def test():
 
     a = net(x)
 
-    # export torchscript
-    mod = torch.jit.trace(net, x)
-    mod.save("test_pnnx_fuse_convtranspose1d_batchnorm1d.pt")
+    mod = convert_and_import(
+        net,
+        (x,),
+        "test_pnnx_fuse_convtranspose1d_batchnorm1d",
+        pnnx_args=("inputshape=[1,12,10]",),
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_pnnx_fuse_convtranspose1d_batchnorm1d.pt inputshape=[1,12,10]")
-
-    # pnnx inference
-    import test_pnnx_fuse_convtranspose1d_batchnorm1d_pnnx
-    b = test_pnnx_fuse_convtranspose1d_batchnorm1d_pnnx.test_inference()
-
-    return torch.allclose(a, b, 1e-4, 1e-4)
+    return check_numerical_result("test_pnnx_fuse_convtranspose1d_batchnorm1d", torch.allclose(a, b, 1e-4, 1e-4))
 
 if __name__ == "__main__":
     if test():

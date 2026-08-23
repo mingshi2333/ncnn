@@ -12,6 +12,8 @@ if version.parse(torch.__version__) < version.parse('2.1'):
 from transformers import T5Config
 from transformers.models.t5.modeling_t5 import T5Attention
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -39,22 +41,20 @@ def test():
 
     a = net(x, mask)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, mask))
-    mod.save("test_transformers_t5_attention.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_transformers_t5_attention.pt inputshape=[3,16,192],[3,1,16,16]")
-
-    # pnnx inference
-    import test_transformers_t5_attention_pnnx
-    b = test_transformers_t5_attention_pnnx.test_inference()
+    mod = convert_and_import(
+        net,
+        (x, mask),
+        "test_transformers_t5_attention",
+        pnnx_args=("inputshape=[3,16,192],[3,1,16,16]",),
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.allclose(a0, b0, 1e-4, 1e-4):
-            return False
-    return True
+            return check_numerical_result("test_transformers_t5_attention", False)
+    return check_numerical_result("test_transformers_t5_attention", True)
 
 if __name__ == "__main__":
     if test():

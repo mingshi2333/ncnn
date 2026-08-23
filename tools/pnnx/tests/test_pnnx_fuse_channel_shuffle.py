@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class ShuffleV1Block(nn.Module):
     def __init__(self, inp, oup, *, group, first_group, mid_channels, ksize, stride):
         super(ShuffleV1Block, self).__init__()
@@ -150,22 +152,21 @@ def test():
 
     a = net(x)
 
-    # export torchscript
-    mod = torch.jit.trace(net, x)
-    mod.save("test_pnnx_channel_shuffle.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_pnnx_channel_shuffle.pt inputshape=[1,8,16,16]")
-
-    # pnnx inference
-    import test_pnnx_channel_shuffle_pnnx
-    b = test_pnnx_channel_shuffle_pnnx.test_inference()
+    mod = convert_and_import(
+        net,
+        (x,),
+        "test_pnnx_fuse_channel_shuffle",
+        pnnx_args=("inputshape=[1,8,16,16]",),
+        output_basename="test_pnnx_channel_shuffle",
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.allclose(a0, b0, 1e-4, 1e-4):
-            return False
-    return True
+            return check_numerical_result("test_pnnx_fuse_channel_shuffle", False)
+    return check_numerical_result("test_pnnx_fuse_channel_shuffle", True)
 
 if __name__ == "__main__":
     if test():

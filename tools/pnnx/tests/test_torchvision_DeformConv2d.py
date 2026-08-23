@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -33,19 +35,17 @@ def test():
 
     a0, a1 = net(x)
 
-    # export torchscript
-    mod = torch.jit.trace(net, x)
-    mod.save("test_torchvision_DeformConv2d.pt")
+    mod = convert_and_import(
+        net,
+        (x,),
+        "test_torchvision_DeformConv2d",
+        pnnx_args=("inputshape=[1,12,64,64]",),
+    )
+    if mod is None:
+        return True
+    b0, b1 = mod.test_inference()
 
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_torchvision_DeformConv2d.pt inputshape=[1,12,64,64]")
-
-    # pnnx inference
-    import test_torchvision_DeformConv2d_pnnx
-    b0, b1 = test_torchvision_DeformConv2d_pnnx.test_inference()
-
-    return torch.equal(a0, b0) and torch.equal(a1, b1)
+    return check_numerical_result("test_torchvision_DeformConv2d", torch.equal(a0, b0) and torch.equal(a1, b1))
 
 if __name__ == "__main__":
     if test():

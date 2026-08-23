@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from packaging import version
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -28,22 +30,20 @@ def test():
 
     a = net(x)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x))
-    mod.save("test_ir_complex.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_ir_complex.pt inputshape=[3,15]c64")
-
-    # pnnx inference
-    import test_ir_complex_pnnx
-    b = test_ir_complex_pnnx.test_inference()
+    mod = convert_and_import(
+        net,
+        (x,),
+        "test_ir_complex",
+        pnnx_args=("inputshape=[3,15]c64",),
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.equal(a0, b0):
-            return False
-    return True
+            return check_numerical_result("test_ir_complex", False)
+    return check_numerical_result("test_ir_complex", True)
 
 if __name__ == "__main__":
     if test():

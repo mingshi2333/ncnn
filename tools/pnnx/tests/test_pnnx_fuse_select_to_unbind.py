@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -37,22 +39,20 @@ def test():
 
     a = net(x)
 
-    # export torchscript
-    mod = torch.jit.trace(net, x)
-    mod.save("test_pnnx_fuse_select_to_unbind.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_pnnx_fuse_select_to_unbind.pt inputshape=[3,4,5]")
-
-    # pnnx inference
-    import test_pnnx_fuse_select_to_unbind_pnnx
-    b = test_pnnx_fuse_select_to_unbind_pnnx.test_inference()
+    mod = convert_and_import(
+        net,
+        (x,),
+        "test_pnnx_fuse_select_to_unbind",
+        pnnx_args=("inputshape=[3,4,5]",),
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.equal(a0, b0):
-            return False
-    return True
+            return check_numerical_result("test_pnnx_fuse_select_to_unbind", False)
+    return check_numerical_result("test_pnnx_fuse_select_to_unbind", True)
 
 if __name__ == "__main__":
     if test():

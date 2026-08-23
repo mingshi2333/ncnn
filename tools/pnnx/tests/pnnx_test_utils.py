@@ -119,7 +119,16 @@ def _import_generated_module(path, basename):
     return module
 
 
-def convert_and_import(net, inputs, basename, pnnx_args=(), trace_kwargs=None):
+def convert_and_import(
+    net,
+    inputs,
+    basename,
+    pnnx_args=(),
+    trace_kwargs=None,
+    output_basename=None,
+    return_diagnostic=False,
+    defer_success_validation=False,
+):
     if not isinstance(inputs, tuple):
         raise TypeError("inputs must be a tuple")
     if not isinstance(pnnx_args, tuple):
@@ -128,6 +137,14 @@ def convert_and_import(net, inputs, basename, pnnx_args=(), trace_kwargs=None):
         trace_kwargs = {}
     if not isinstance(trace_kwargs, dict):
         raise TypeError("trace_kwargs must be a dict")
+    if output_basename is None:
+        output_basename = basename
+    if not isinstance(output_basename, str) or not output_basename:
+        raise TypeError("output_basename must be a non-empty string")
+    if not isinstance(return_diagnostic, bool):
+        raise TypeError("return_diagnostic must be a bool")
+    if not isinstance(defer_success_validation, bool):
+        raise TypeError("defer_success_validation must be a bool")
 
     export_format = _selected_format()
     if export_format == ExportTestFormat.EXPORTED_PROGRAM:
@@ -136,7 +153,6 @@ def convert_and_import(net, inputs, basename, pnnx_args=(), trace_kwargs=None):
             print("%s: pt2 producer gate: %s (torch %s)" % (basename, producer_status, torch.__version__))
             return None
 
-    output_basename = basename
     if export_format == ExportTestFormat.EXPORTED_PROGRAM:
         output_basename += "_pt2"
 
@@ -179,8 +195,10 @@ def convert_and_import(net, inputs, basename, pnnx_args=(), trace_kwargs=None):
             return _handle_pt2_failure(basename, PNNX_LOWERING_UNSUPPORTED, detail)
         raise
 
-    if export_format == ExportTestFormat.EXPORTED_PROGRAM:
+    if export_format == ExportTestFormat.EXPORTED_PROGRAM and not defer_success_validation:
         _handle_pt2_conversion_success(basename)
+    if return_diagnostic:
+        return module, diagnostic
     return module
 
 

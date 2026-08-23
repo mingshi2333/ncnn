@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import List
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -29,22 +31,21 @@ def test():
 
     a = net(x, y, z)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, y, z))
-    mod.save("test_pnnx_pnnx_fuse_input_unpack.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_pnnx_pnnx_fuse_input_unpack.pt inputshape=[2,3,4],[2,3,4],[2,3,4],[2,3,4],[2,3,4],[2,3,4]")
-
-    # pnnx inference
-    import test_pnnx_pnnx_fuse_input_unpack_pnnx
-    b = test_pnnx_pnnx_fuse_input_unpack_pnnx.test_inference()
+    mod = convert_and_import(
+        net,
+        (x, y, z),
+        "test_pnnx_fuse_input_unpack",
+        pnnx_args=("inputshape=[2,3,4],[2,3,4],[2,3,4],[2,3,4],[2,3,4],[2,3,4]",),
+        output_basename="test_pnnx_pnnx_fuse_input_unpack",
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.equal(a0, b0):
-            return False
-    return True
+            return check_numerical_result("test_pnnx_fuse_input_unpack", False)
+    return check_numerical_result("test_pnnx_fuse_input_unpack", True)
 
 if __name__ == "__main__":
     if test():

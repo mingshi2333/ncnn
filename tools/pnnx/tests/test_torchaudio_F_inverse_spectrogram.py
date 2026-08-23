@@ -7,6 +7,8 @@ import torch.nn.functional as F
 import torchaudio
 from packaging import version
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -33,22 +35,20 @@ def test():
 
     a = net(x, y, z, w)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, y, z, w))
-    mod.save("test_torchaudio_F_inverse_spectrogram.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_torchaudio_F_inverse_spectrogram.pt inputshape=[3,33,161]c64,[1,65,77]c64,[257,8]c64,[512,4]c64")
-
-    # pnnx inference
-    import test_torchaudio_F_inverse_spectrogram_pnnx
-    b = test_torchaudio_F_inverse_spectrogram_pnnx.test_inference()
+    mod = convert_and_import(
+        net,
+        (x, y, z, w),
+        "test_torchaudio_F_inverse_spectrogram",
+        pnnx_args=("inputshape=[3,33,161]c64,[1,65,77]c64,[257,8]c64,[512,4]c64",),
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.allclose(a0, b0, 1e-4, 1e-4):
-            return False
-    return True
+            return check_numerical_result("test_torchaudio_F_inverse_spectrogram", False)
+    return check_numerical_result("test_torchaudio_F_inverse_spectrogram", True)
 
 if __name__ == "__main__":
     if test():

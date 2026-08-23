@@ -6,6 +6,8 @@ import torchvision
 import torchvision.models as models
 from packaging import version
 
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
 def test():
     if version.parse(torchvision.__version__) < version.parse('0.12'):
         return True
@@ -18,22 +20,17 @@ def test():
 
     a = net(x)
 
-    # export torchscript
-    mod = torch.jit.trace(net, x)
-    mod.save("test_convnext_tiny.pt")
+    mod = convert_and_import(
+        net,
+        (x,),
+        "test_convnext_tiny",
+        pnnx_args=() if version.parse(torch.__version__) >= version.parse('2.0') else ("inputshape=[1,3,224,224]",),
+    )
+    if mod is None:
+        return True
+    b = mod.test_inference()
 
-    # torchscript to pnnx
-    import os
-    if version.parse(torch.__version__) >= version.parse('2.0'):
-        os.system("../src/pnnx test_convnext_tiny.pt")
-    else:
-        os.system("../src/pnnx test_convnext_tiny.pt inputshape=[1,3,224,224]")
-
-    # pnnx inference
-    import test_convnext_tiny_pnnx
-    b = test_convnext_tiny_pnnx.test_inference()
-
-    return torch.allclose(a, b, 1e-4, 1e-4)
+    return check_numerical_result("test_convnext_tiny", torch.allclose(a, b, 1e-4, 1e-4))
 
 if __name__ == "__main__":
     if test():

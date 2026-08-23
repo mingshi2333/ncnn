@@ -1,16 +1,18 @@
 # Copyright 2026 Tencent
 # SPDX-License-Identifier: BSD-3-Clause
 
-import os
 import re
-import subprocess
-import sys
 
 from packaging import version
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from pnnx_test_utils import check_numerical_result, convert_and_import
+
+
+_pt2_expected_failure = False
 
 
 class Model(nn.Module):
@@ -356,6 +358,10 @@ def _allclose(a, b):
 
 
 def _run_case(name, net, inputs, inputshape, expected_inputshape, expected_flops, expected_memops):
+    global _pt2_expected_failure
+    if _pt2_expected_failure:
+        return True
+
     net.eval()
 
     torch.manual_seed(0)
@@ -363,24 +369,24 @@ def _run_case(name, net, inputs, inputshape, expected_inputshape, expected_flops
 
     a = net(*inputs)
 
-    # export torchscript
-    mod = torch.jit.trace(net, inputs)
-    mod.save(name + ".pt")
+    converted = convert_and_import(
+        net,
+        inputs,
+        "test_pnnx_model_stat",
+        pnnx_args=("inputshape=" + inputshape,),
+        output_basename=name,
+        return_diagnostic=True,
+        defer_success_validation=True,
+    )
+    if converted is None:
+        _pt2_expected_failure = True
+        return True
 
-    # torchscript to pnnx
-    cmd = ["../src/pnnx", name + ".pt", "inputshape=" + inputshape]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    if p.returncode != 0:
-        sys.stderr.write(p.stdout)
-        sys.stderr.write(p.stderr)
+    pnnx_module, diagnostic = converted
+    if not _check_stat_text(diagnostic, expected_inputshape, expected_flops, expected_memops):
         return False
 
-    if not _check_stat_text(p.stdout + p.stderr, expected_inputshape, expected_flops, expected_memops):
-        sys.stderr.write(p.stdout)
-        sys.stderr.write(p.stderr)
-        return False
-
-    with open(name + "_pnnx.py", "r") as f:
+    with open(pnnx_module.__file__, "r") as f:
         pnnx_py = f.read()
 
     if "# pnnx model stat" not in pnnx_py:
@@ -388,52 +394,53 @@ def _run_case(name, net, inputs, inputshape, expected_inputshape, expected_flops
     if not _check_stat_text(pnnx_py, expected_inputshape, expected_flops, expected_memops):
         return False
 
-    # pnnx inference
-    pnnx_module = __import__(name + "_pnnx")
     b = pnnx_module.test_inference()
 
     return _allclose(a, b)
 
 
 def test():
+    global _pt2_expected_failure
+    _pt2_expected_failure = False
+
     if not _run_case("test_pnnx_model_stat", Model(),
                      ((1, 3, 8, 8),),
                      "[1,3,8,8]", "[1,3,8,8]f32",
                      23708, 4166):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_multi_input", MultiInputModel(),
                      ((2, 3), (2, 3), (3, 4), (4,)),
                      "[2,3],[2,3],[3,4],[4]",
                      "[2,3]f32,[2,3]f32,[3,4]f32,[4]f32",
                      70, 80):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_view_materialize", ViewMaterializeModel(),
                      ((2, 3), (2, 3)),
                      "[2,3],[2,3]", "[2,3]f32,[2,3]f32",
                      0, 36):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_expression", ExpressionModel(),
                      ((2, 3),),
                      "[2,3]", "[2,3]f32",
                      96, 12):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_addmm", AddmmModel(),
                      ((2, 4), (2, 3), (3, 4)),
                      "[2,4],[2,3],[3,4]",
                      "[2,4]f32,[2,3]f32,[3,4]f32",
                      56, 34):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_scaled_addmm_baddbmm", ScaledAddmmBaddbmmModel(),
                      ((2, 4), (2, 3), (3, 4), (2, 2, 4), (2, 2, 3), (2, 3, 4)),
                      "[2,4],[2,3],[3,4],[2,2,4],[2,2,3],[2,3,4]",
                      "[2,4]f32,[2,3]f32,[3,4]f32,[2,2,4]f32,[2,2,3]f32,[2,3,4]f32",
                      200, 94):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if version.parse(torch.__version__) >= version.parse('1.12'):
         if not _run_case("test_pnnx_model_stat_unbatched_convolution", UnbatchedConvolutionModel(),
@@ -441,63 +448,63 @@ def test():
                          "[2,5],[2,4,4],[1,3,3,3],[2,5]",
                          "[2,5]f32,[2,4,4]f32,[1,3,3,3]f32,[2,5]f32",
                          5019, 358):
-            return False
+            return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_norm_no_affine", FunctionalNormNoAffineModel(),
                      ((2, 4, 3, 3),),
                      "[2,4,3,3]", "[2,4,3,3]f32",
                      1152, 440):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_functional_batch_norm", FunctionalBatchNormModel(),
                      ((2, 4, 3, 3), (4,), (4,), (4,), (4,)),
                      "[2,4,3,3],[4],[4],[4],[4]",
                      "[2,4,3,3]f32,[4]f32,[4]f32,[4]f32,[4]f32",
                      288, 160):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_instance_norm_stats", InstanceNormStatsModel(),
                      ((2, 4, 3, 3),),
                      "[2,4,3,3]", "[2,4,3,3]f32",
                      936, 312):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_embedding", EmbeddingModel(),
                      (("randint", 10, (2, 3), torch.int),),
                      "[2,3]i32", "[2,3]i32",
                      0, 54):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_multihead_attention_mask", MultiheadAttentionMaskModel(),
                      ((3, 1, 4), (3, 3)),
                      "[3,1,4],[3,3]", "[3,1,4]f32,[3,3]f32",
                      684, 155):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_multihead_attention_extra", MultiheadAttentionExtraModel(),
                      ((3, 1, 4),),
                      "[3,1,4]", "[3,1,4]f32",
                      822, 166):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if version.parse(torch.__version__) >= version.parse('1.12'):
         if not _run_case("test_pnnx_model_stat_multihead_attention_unbatched", UnbatchedMultiheadAttentionModel(),
                          ((3, 4),),
                          "[3,4]", "[3,4]f32",
                          666, 146):
-            return False
+            return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_normalize", NormalizeModel(),
                      ((2, 3, 4),),
                      "[2,3,4]", "[2,3,4]f32",
                      112, 112):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_reduction", ReductionStatModel(),
                      ((2, 3),),
                      "[2,3]", "[2,3]f32",
                      130, 40):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     fused_functional_flops = 324 if version.parse(torch.__version__) < version.parse('2.0') else 308
     fused_functional_memops = 206 if version.parse(torch.__version__) < version.parse('2.0') else 126
@@ -506,39 +513,39 @@ def test():
                      "[1,4,2,2],[1,1,4,4],[2,3],[2,3]",
                      "[1,4,2,2]f32,[1,1,4,4]f32,[2,3]f32,[2,3]f32",
                      fused_functional_flops, fused_functional_memops):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_fold", FoldModel(),
                      ((1, 4, 4),),
                      "[1,4,4]", "[1,4,4]f32",
                      7, 25):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_adaptive_pool", AdaptivePoolModel(),
                      ((1, 1, 5, 5),),
                      "[1,1,5,5]", "[1,1,5,5]f32",
                      49, 34):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_upsample_nearest", UpsampleNearestModel(),
                      ((1, 1, 2, 2),),
                      "[1,1,2,2]", "[1,1,2,2]f32",
                      0, 20):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if not _run_case("test_pnnx_model_stat_lstm_proj_state", LSTMProjStateModel(),
                      ((2, 1, 3), (1, 1, 2), (1, 1, 4)),
                      "[2,1,3],[1,1,2],[1,1,4]",
                      "[2,1,3]f32,[1,1,2]f32,[1,1,4]f32",
                      432, 110):
-        return False
+        return check_numerical_result("test_pnnx_model_stat", False)
 
     if version.parse(torch.__version__) >= version.parse('1.12'):
         if not _run_case("test_pnnx_model_stat_lstm_unbatched", UnbatchedLSTMModel(),
                          ((2, 3),),
                          "[2,3]", "[2,3]f32",
                          528, 134):
-            return False
+            return check_numerical_result("test_pnnx_model_stat", False)
 
     if hasattr(F, "scaled_dot_product_attention"):
         if not _run_case("test_pnnx_model_stat_scaled_dot_product_attention_no_mask", ScaledDotProductAttentionNoMaskModel(),
@@ -546,23 +553,25 @@ def test():
                          "[1,2,3,4],[1,2,3,4],[1,2,3,5]",
                          "[1,2,3,4]f32,[1,2,3,4]f32,[1,2,3,5]f32",
                          414, 126):
-            return False
+            return check_numerical_result("test_pnnx_model_stat", False)
 
         if not _run_case("test_pnnx_model_stat_scaled_dot_product_attention_mask", ScaledDotProductAttentionMaskModel(),
                          ((1, 2, 3, 4), (1, 2, 3, 4), (1, 2, 3, 5), (1, 2, 3, 3)),
                          "[1,2,3,4],[1,2,3,4],[1,2,3,5],[1,2,3,3]",
                          "[1,2,3,4]f32,[1,2,3,4]f32,[1,2,3,5]f32,[1,2,3,3]f32",
                          432, 144):
-            return False
+            return check_numerical_result("test_pnnx_model_stat", False)
 
         if not _run_case("test_pnnx_model_stat_scaled_dot_product_attention_causal", ScaledDotProductAttentionCausalModel(),
                          ((1, 2, 3, 4), (1, 2, 3, 4), (1, 2, 3, 5)),
                          "[1,2,3,4],[1,2,3,4],[1,2,3,5]",
                          "[1,2,3,4]f32,[1,2,3,4]f32,[1,2,3,5]f32",
                          432, 126):
-            return False
+            return check_numerical_result("test_pnnx_model_stat", False)
 
-    return True
+    if _pt2_expected_failure:
+        return True
+    return check_numerical_result("test_pnnx_model_stat", True)
 
 
 if __name__ == "__main__":
