@@ -24,6 +24,17 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_model_format.py $<TARGET_FILE:pnnx_test_model_format>
 )
 
+add_executable(pnnx_test_json_reader
+    test_json_reader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/json_reader.cpp
+)
+target_include_directories(pnnx_test_json_reader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+add_test(
+    NAME test_json_reader
+    COMMAND $<TARGET_FILE:pnnx_test_json_reader>
+)
+
 macro(pnnx_add_test name)
     add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endmacro()
