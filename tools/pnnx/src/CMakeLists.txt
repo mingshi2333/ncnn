@@ -664,6 +664,7 @@ endif()
 
 set(torch2pnnx_SRCS
 
+    exported_program_operator.cpp
     pass_level0.cpp
     pass_level1.cpp
 

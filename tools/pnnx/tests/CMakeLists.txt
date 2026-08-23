@@ -80,6 +80,29 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program_tensor.py $<TARGET_FILE:pnnx_test_exported_program_tensor>
 )
 
+add_executable(pnnx_test_exported_program_operator
+    test_exported_program_operator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/exported_program_operator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/exported_program_schema.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pt2_archive.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/model_format.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/json_reader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/storezip.cpp
+)
+target_include_directories(pnnx_test_exported_program_operator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_compile_options(pnnx_test_exported_program_operator PRIVATE "${TORCH_CXX_FLAGS}")
+if(WIN32)
+    target_compile_definitions(pnnx_test_exported_program_operator PRIVATE NOMINMAX)
+    target_link_libraries(pnnx_test_exported_program_operator PRIVATE ${TORCH_LIBRARIES})
+else()
+    target_link_libraries(pnnx_test_exported_program_operator PRIVATE ${TORCH_LIBRARIES} pthread dl)
+endif()
+
+add_test(
+    NAME test_exported_program_operator
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program_operator.py $<TARGET_FILE:pnnx_test_exported_program_operator>
+)
+
 macro(pnnx_add_test name)
     add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endmacro()
