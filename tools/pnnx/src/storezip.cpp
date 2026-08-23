@@ -10,6 +10,7 @@
 #endif
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -178,13 +179,19 @@ static bool storezip_fread_exact(FILE* fp, void* data, size_t size)
 struct StoreZipCentralEntry
 {
     std::string name;
-    uint64_t size;
+    uint64_t compressed_size;
+    uint64_t uncompressed_size;
     uint64_t local_header_offset;
+    uint32_t crc32;
+    uint16_t flag;
+    uint16_t compression;
 };
 
 StoreZipReader::StoreZipReader()
 {
     fp = 0;
+
+    CRC32_TABLE_INIT();
 }
 
 StoreZipReader::~StoreZipReader()
@@ -353,6 +360,7 @@ int StoreZipReader::open(const std::string& path)
     uint64_t cursor = cd_offset;
     std::vector<StoreZipCentralEntry> entries;
     entries.reserve((size_t)total_records);
+    std::set<std::string> entry_names;
 
     for (uint64_t i = 0; i < total_records; i++)
     {
@@ -373,6 +381,7 @@ int StoreZipReader::open(const std::string& path)
 
         const uint16_t flag = read_le16(cdfh + 8);
         const uint16_t compression = read_le16(cdfh + 10);
+        const uint32_t crc32 = read_le32(cdfh + 16);
         uint64_t compressed_size = read_le32(cdfh + 20);
         uint64_t uncompressed_size = read_le32(cdfh + 24);
         const uint16_t file_name_length = read_le16(cdfh + 28);
@@ -391,7 +400,7 @@ int StoreZipReader::open(const std::string& path)
 
         std::string name(file_name_length, '\0');
         std::vector<unsigned char> extra(extra_field_length);
-        if (!storezip_fread_exact(fp, name.data(), name.size()) || !storezip_fread_exact(fp, extra.data(), extra.size()))
+        if (!storezip_fread_exact(fp, name.empty() ? 0 : &name[0], name.size()) || !storezip_fread_exact(fp, extra.data(), extra.size()))
         {
             fprintf(stderr, "read zip central directory entry failed\n");
             close();
@@ -491,9 +500,9 @@ int StoreZipReader::open(const std::string& path)
             close();
             return fail_open;
         }
-        if (compression != 0 || compressed_size != uncompressed_size)
+        if (compression == 0 && compressed_size != uncompressed_size)
         {
-            fprintf(stderr, "compressed zip entry is not supported\n");
+            fprintf(stderr, "stored zip entry has different compressed and uncompressed sizes\n");
             close();
             return fail_open;
         }
@@ -503,11 +512,21 @@ int StoreZipReader::open(const std::string& path)
             close();
             return fail_open;
         }
+        if (!entry_names.insert(name).second)
+        {
+            fprintf(stderr, "duplicate zip entry name %s\n", name.c_str());
+            close();
+            return fail_open;
+        }
 
         StoreZipCentralEntry entry;
         entry.name = name;
-        entry.size = uncompressed_size;
+        entry.compressed_size = compressed_size;
+        entry.uncompressed_size = uncompressed_size;
         entry.local_header_offset = local_header_offset;
+        entry.crc32 = crc32;
+        entry.flag = flag;
+        entry.compression = compression;
         entries.push_back(entry);
 
         cursor += 46 + variable_size;
@@ -541,13 +560,42 @@ int StoreZipReader::open(const std::string& path)
 
         const uint16_t local_flag = read_le16(lfh + 6);
         const uint16_t local_compression = read_le16(lfh + 8);
+        const uint32_t local_crc32 = read_le32(lfh + 14);
+        const uint32_t local_compressed_size = read_le32(lfh + 18);
+        const uint32_t local_uncompressed_size = read_le32(lfh + 22);
         const uint16_t local_file_name_length = read_le16(lfh + 26);
         const uint16_t local_extra_field_length = read_le16(lfh + 28);
         const uint64_t local_variable_size = (uint64_t)local_file_name_length + local_extra_field_length;
 
-        if ((local_flag & 0x0041) != 0 || local_compression != 0)
+        if ((local_flag & 0x0041) != 0)
         {
-            fprintf(stderr, "unsupported zip local file header\n");
+            fprintf(stderr, "encrypted zip local file entry is not supported\n");
+            close();
+            return fail_open;
+        }
+        if (local_flag != entry.flag)
+        {
+            fprintf(stderr, "zip local file flag mismatch %s\n", entry.name.c_str());
+            close();
+            return fail_open;
+        }
+        if (local_compression != entry.compression)
+        {
+            fprintf(stderr, "zip local file compression mismatch %s\n", entry.name.c_str());
+            close();
+            return fail_open;
+        }
+        if ((local_flag & 0x0008) == 0 && local_crc32 != entry.crc32)
+        {
+            fprintf(stderr, "zip local file crc mismatch %s\n", entry.name.c_str());
+            close();
+            return fail_open;
+        }
+        const bool local_compressed_size_mismatch = local_compressed_size != 0xffffffff && local_compressed_size != entry.compressed_size;
+        const bool local_uncompressed_size_mismatch = local_uncompressed_size != 0xffffffff && local_uncompressed_size != entry.uncompressed_size;
+        if ((local_flag & 0x0008) == 0 && (local_compressed_size_mismatch || local_uncompressed_size_mismatch))
+        {
+            fprintf(stderr, "zip local file size mismatch %s\n", entry.name.c_str());
             close();
             return fail_open;
         }
@@ -558,8 +606,22 @@ int StoreZipReader::open(const std::string& path)
             return fail_open;
         }
 
+        std::string local_name(local_file_name_length, '\0');
+        if (!storezip_fread_exact(fp, local_name.empty() ? 0 : &local_name[0], local_name.size()))
+        {
+            fprintf(stderr, "read zip local file name failed\n");
+            close();
+            return fail_open;
+        }
+        if (local_name != entry.name)
+        {
+            fprintf(stderr, "zip local file name mismatch %s\n", entry.name.c_str());
+            close();
+            return fail_open;
+        }
+
         const uint64_t data_offset = entry.local_header_offset + 30 + local_variable_size;
-        if (data_offset > cd_offset || entry.size > cd_offset - data_offset)
+        if (data_offset > cd_offset || entry.compressed_size > cd_offset - data_offset)
         {
             fprintf(stderr, "zip entry data is outside archive data range\n");
             close();
@@ -568,7 +630,11 @@ int StoreZipReader::open(const std::string& path)
 
         StoreZipMeta fm;
         fm.offset = data_offset;
-        fm.size = entry.size;
+        fm.compressed_size = entry.compressed_size;
+        fm.uncompressed_size = entry.uncompressed_size;
+        fm.crc32 = entry.crc32;
+        fm.flag = entry.flag;
+        fm.compression = entry.compression;
         filemetas2[entry.name] = fm;
     }
 
@@ -588,15 +654,33 @@ std::vector<std::string> StoreZipReader::get_names() const
     return names;
 }
 
+bool StoreZipReader::has_file(const std::string& name) const
+{
+    return filemetas.find(name) != filemetas.end();
+}
+
+bool StoreZipReader::is_file_stored(const std::string& name) const
+{
+    std::map<std::string, StoreZipMeta>::const_iterator it = filemetas.find(name);
+    if (it == filemetas.end())
+    {
+        fprintf(stderr, "no such file %s\n", name.c_str());
+        return false;
+    }
+
+    return it->second.compression == 0;
+}
+
 uint64_t StoreZipReader::get_file_size(const std::string& name) const
 {
-    if (filemetas.find(name) == filemetas.end())
+    std::map<std::string, StoreZipMeta>::const_iterator it = filemetas.find(name);
+    if (it == filemetas.end())
     {
         fprintf(stderr, "no such file %s\n", name.c_str());
         return 0;
     }
 
-    return filemetas.at(name).size;
+    return it->second.uncompressed_size;
 }
 
 int StoreZipReader::read_file(const std::string& name, char* data)
@@ -607,21 +691,29 @@ int StoreZipReader::read_file(const std::string& name, char* data)
         return -1;
     }
 
-    if (filemetas.find(name) == filemetas.end())
+    std::map<std::string, StoreZipMeta>::const_iterator it = filemetas.find(name);
+    if (it == filemetas.end())
     {
         fprintf(stderr, "no such file %s\n", name.c_str());
         return -1;
     }
 
-    uint64_t offset = filemetas[name].offset;
-    uint64_t size = filemetas[name].size;
+    const StoreZipMeta& fm = it->second;
+    if (fm.compression != 0)
+    {
+        fprintf(stderr, "compressed zip entry is not supported %s method=%u\n", name.c_str(), (unsigned int)fm.compression);
+        return -1;
+    }
 
-    if (storezip_fseek_absolute(fp, offset) != 0)
+    uint64_t size = fm.uncompressed_size;
+
+    if (storezip_fseek_absolute(fp, fm.offset) != 0)
     {
         fprintf(stderr, "seek zip entry failed %s\n", name.c_str());
         return -1;
     }
 
+    uint32_t crc32 = 0xffffffff;
     while (size != 0)
     {
         const size_t chunk_size = size > 0x40000000 ? 0x40000000 : (size_t)size;
@@ -631,8 +723,18 @@ int StoreZipReader::read_file(const std::string& name, char* data)
             return -1;
         }
 
+        for (size_t i = 0; i < chunk_size; i++)
+            crc32 = CRC32(crc32, (unsigned char)data[i]);
+
         data += chunk_size;
         size -= chunk_size;
+    }
+
+    crc32 ^= 0xffffffff;
+    if (crc32 != fm.crc32)
+    {
+        fprintf(stderr, "zip entry crc mismatch %s\n", name.c_str());
+        return -1;
     }
 
     return 0;

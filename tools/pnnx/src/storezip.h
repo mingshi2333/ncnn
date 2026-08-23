@@ -22,6 +22,10 @@ public:
 
     std::vector<std::string> get_names() const;
 
+    bool has_file(const std::string& name) const;
+
+    bool is_file_stored(const std::string& name) const;
+
     uint64_t get_file_size(const std::string& name) const;
 
     int read_file(const std::string& name, char* data);
@@ -34,7 +38,11 @@ private:
     struct StoreZipMeta
     {
         uint64_t offset;
-        uint64_t size;
+        uint64_t compressed_size;
+        uint64_t uncompressed_size;
+        uint32_t crc32;
+        uint16_t flag;
+        uint16_t compression;
     };
 
     std::map<std::string, StoreZipMeta> filemetas;
