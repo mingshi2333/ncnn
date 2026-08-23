@@ -758,6 +758,7 @@ if(NOT MSVC)
 endif()
 
 set(pnnx_SRCS
+    exported_program_schema.cpp
     main.cpp
     ir.cpp
     json_reader.cpp

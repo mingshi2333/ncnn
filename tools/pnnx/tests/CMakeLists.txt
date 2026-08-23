@@ -49,6 +49,21 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_pt2_archive.py $<TARGET_FILE:pnnx_test_pt2_archive>
 )
 
+add_executable(pnnx_test_exported_program_schema
+    test_exported_program_schema.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/exported_program_schema.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pt2_archive.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/model_format.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/json_reader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/storezip.cpp
+)
+target_include_directories(pnnx_test_exported_program_schema PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+add_test(
+    NAME test_exported_program_schema
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program_schema.py $<TARGET_FILE:pnnx_test_exported_program_schema>
+)
+
 macro(pnnx_add_test name)
     add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endmacro()
