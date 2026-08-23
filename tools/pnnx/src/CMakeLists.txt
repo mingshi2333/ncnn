@@ -759,6 +759,7 @@ endif()
 
 set(pnnx_SRCS
     exported_program_schema.cpp
+    exported_program_tensor.cpp
     main.cpp
     ir.cpp
     json_reader.cpp
