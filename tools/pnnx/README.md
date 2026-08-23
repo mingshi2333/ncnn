@@ -31,12 +31,79 @@ PNNX tries to define a set of operators and a simple and easy-to-use format that
 9. [Model optimization](#pnnx-model-optimization)
 10. [Custom operator support](#pnnx-custom-operator)
 
-# Build TorchScript to PNNX converter
+# Build PNNX converter
 
 1. Install PyTorch and TorchVision c++ library
 2. Build PNNX with cmake
 
 # Usage
+
+## ExportedProgram
+
+1. Export your model with `torch.export` and save the ExportedProgram as PT2
+
+```python
+import torch
+
+model = Model().eval()
+example_inputs = (torch.rand(1, 3, 224, 224),)
+
+exported_program = torch.export.export(model, example_inputs)
+torch.export.save(exported_program, "model.pt2")
+```
+
+2. Convert ExportedProgram to PNNX
+
+```shell
+pnnx model.pt2
+```
+
+The input shapes and model state are read from the PT2 package. Parameters, persistent buffers and tensor constants become PNNX model attributes instead of runtime inputs.
+
+3. Export the generated PNNX python model as another ExportedProgram
+
+```shell
+python -c 'import model_pnnx; model_pnnx.export_exported_program()'
+```
+
+This creates `model_pnnx.pt2` and returns the `torch.export.ExportedProgram` object. Pass a tuple to `export_exported_program(example_inputs)` to override the generated example inputs.
+
+### Current ExportedProgram support
+
+- PT2 archive version `0` with one ExportedProgram and uncompressed, unencrypted ZIP entries
+- Raw tensor payloads produced by PyTorch 2.9.0, 2.10.0, 2.11.0 and 2.12.1
+- Static inference graphs with flat tensor user inputs and outputs
+- Parameters, persistent buffers and tensor constants with raw strided tensor payloads, including shape, stride and storage offset
+- Byte, Char, Short, Int, Long, Half, Float, Double, ComplexHalf, ComplexFloat, ComplexDouble, Bool and BFloat16 state tensors
+- `torch.ops.aten.adaptive_avg_pool2d.default`, `torch.ops.aten.batch_norm.default`, `torch.ops.aten.conv2d.default`, `torch.ops.aten.linear.default`, `torch.ops.aten.max_pool2d.default`, `torch.ops.aten.relu.default`, `torch.ops.aten.relu_.default`, `torch.ops.aten.add_.Tensor` and `torch.ops.aten.flatten.using_ints`
+- Operator defaults are resolved against the linked libtorch dispatcher and the archive ATen opset must match the linked libtorch opset
+
+### Unsupported ExportedProgram features
+
+- PyTorch 2.8 legacy pickled-payload PT2 and unverified producer versions after PyTorch 2.12.1
+- AOTInductor-only packages or multiple ExportedPrograms in one PT2 package
+- Dynamic shapes, symbolic tensor metadata and range constraints
+- Training graphs, loss or gradient outputs, and parameter, buffer or user-input mutation outputs
+- Non-persistent buffers, custom objects, tokens and higher-order operators
+- Non-tensor user inputs or outputs and ATen operators outside the allowlist above
+- Compressed or encrypted PT2 entries and PT2 archive versions other than `0`
+
+Unsupported inputs fail with a feature-specific `load exported program failed:` diagnostic. They are not silently treated as TorchScript.
+
+### ExportedProgram contributor tests
+
+```shell
+ctest --test-dir build --output-on-failure \
+  -R '^(test_storezip|test_model_format|test_json_reader|test_pt2_archive|test_exported_program.*|test_pt2_version_compatibility)$'
+```
+
+Run the complete PT2 operator and model expectation suite with:
+
+```shell
+ctest --test-dir build --output-on-failure -j 8 -R '^test_pt2_'
+```
+
+## TorchScript
 
 1. Export your model to TorchScript
 
