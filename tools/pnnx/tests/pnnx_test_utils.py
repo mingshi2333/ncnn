@@ -119,11 +119,15 @@ def _import_generated_module(path, basename):
     return module
 
 
-def convert_and_import(net, inputs, basename, pnnx_args=()):
+def convert_and_import(net, inputs, basename, pnnx_args=(), trace_kwargs=None):
     if not isinstance(inputs, tuple):
         raise TypeError("inputs must be a tuple")
     if not isinstance(pnnx_args, tuple):
         raise TypeError("pnnx_args must be a tuple")
+    if trace_kwargs is None:
+        trace_kwargs = {}
+    if not isinstance(trace_kwargs, dict):
+        raise TypeError("trace_kwargs must be a dict")
 
     export_format = _selected_format()
     if export_format == ExportTestFormat.EXPORTED_PROGRAM:
@@ -147,7 +151,7 @@ def convert_and_import(net, inputs, basename, pnnx_args=()):
             exported_program = torch.export.export(net, inputs)
             torch.export.save(exported_program, archive_path)
         else:
-            traced_module = torch.jit.trace(net, inputs)
+            traced_module = torch.jit.trace(net, inputs, **trace_kwargs)
             traced_module.save(str(archive_path))
     except Exception as exc:
         if export_format == ExportTestFormat.EXPORTED_PROGRAM:
