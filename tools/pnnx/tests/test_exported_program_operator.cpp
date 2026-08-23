@@ -248,6 +248,13 @@ static void test_targets()
     std::string error;
     check(pnnx::parse_exported_aten_target("torch.ops.aten.linear.default", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "linear default is not supported");
     check(pnnx::parse_exported_aten_target("torch.ops.aten.relu.default", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "relu default is not supported");
+    check(pnnx::parse_exported_aten_target("torch.ops.aten.relu_.default", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "relu_ default is not supported");
+    check(pnnx::parse_exported_aten_target("torch.ops.aten.conv2d.default", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "conv2d default is not supported");
+    check(pnnx::parse_exported_aten_target("torch.ops.aten.batch_norm.default", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "batch_norm default is not supported");
+    check(pnnx::parse_exported_aten_target("torch.ops.aten.max_pool2d.default", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "max_pool2d default is not supported");
+    check(pnnx::parse_exported_aten_target("torch.ops.aten.adaptive_avg_pool2d.default", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "adaptive_avg_pool2d default is not supported");
+    check(pnnx::parse_exported_aten_target("torch.ops.aten.add_.Tensor", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "add_ Tensor is not supported");
+    check(pnnx::parse_exported_aten_target("torch.ops.aten.flatten.using_ints", target, error) == 0 && pnnx::is_exported_aten_target_supported(target), "target allowlist", "flatten using_ints is not supported");
     check(pnnx::parse_exported_aten_target("torch.ops.aten.add.Tensor", target, error) == 0 && !pnnx::is_exported_aten_target_supported(target), "target allowlist", "add Tensor entered initial lowering allowlist");
     check(pnnx::parse_exported_aten_target("torch.ops.aten.linear.out", target, error) == 0 && !pnnx::is_exported_aten_target_supported(target), "target allowlist", "linear out entered initial lowering allowlist");
 }

@@ -8,6 +8,7 @@
 
 #include <limits.h>
 
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -211,6 +212,49 @@ static std::string unique_name(const std::string& requested, std::set<std::strin
     }
 }
 
+static int exported_int_to_pnnx(int64_t value)
+{
+    if (value == std::numeric_limits<int64_t>::max()) value = INT_MAX;
+    if (value == std::numeric_limits<int64_t>::max() - 1) value = INT_MAX - 1;
+    if (value == std::numeric_limits<int64_t>::min()) value = INT_MIN;
+    if (value == std::numeric_limits<int64_t>::min() + 1) value = INT_MIN + 1;
+    return (int)value;
+}
+
+static int exported_argument_to_parameter(const ExportedArgument& argument, Parameter& parameter)
+{
+    if (argument.type == EXPORTED_ARGUMENT_NONE)
+    {
+        parameter.type = 0;
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_INT)
+    {
+        parameter.type = 2;
+        parameter.i = exported_int_to_pnnx(argument.int_value);
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_INT_LIST)
+    {
+        parameter.type = 5;
+        parameter.ai.reserve(argument.int_values.size());
+        for (size_t i = 0; i < argument.int_values.size(); i++)
+            parameter.ai.push_back(exported_int_to_pnnx(argument.int_values[i]));
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_FLOAT)
+    {
+        parameter.type = 3;
+        parameter.f = (float)argument.float_value;
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_BOOL)
+    {
+        parameter.type = 1;
+        parameter.b = argument.bool_value;
+    }
+    else
+        return -1;
+
+    return 0;
+}
+
 int lower_exported_program(const ExportedProgram& program,
                            const std::map<std::string, MaterializedExportedTensor>& state,
                            Graph& graph,
@@ -340,7 +384,7 @@ int lower_exported_program(const ExportedProgram& program,
 
                 operand = value_it->second;
             }
-            else if (arguments[j].value.type == EXPORTED_ARGUMENT_NONE)
+            else
             {
                 std::ostringstream constant_name;
                 constant_name << "pnnx_" << unknown_index++;
@@ -350,12 +394,11 @@ int lower_exported_program(const ExportedProgram& program,
                 operand = candidate.new_operand(constant_operand_name);
                 operand->producer = constant;
                 constant->outputs.push_back(operand);
-                constant->params["value"] = Parameter();
-            }
-            else
-            {
-                error = "unsupported non-tensor argument " + arguments[j].name + " for " + node.target;
-                return -1;
+                if (exported_argument_to_parameter(arguments[j].value, constant->params["value"]) != 0)
+                {
+                    error = "unsupported non-tensor argument " + arguments[j].name + " for " + node.target;
+                    return -1;
+                }
             }
 
             operand->consumers.push_back(op);

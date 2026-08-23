@@ -121,8 +121,13 @@ add_executable(pnnx_test_exported_program_ir
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/eliminate_size_numtotensor_int.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/functionize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/fuse_constantlist.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_adaptive_avg_pool2d.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_batch_norm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_conv2d.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_linear.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_max_pool2d.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_relu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_flatten.cpp
 )
 target_include_directories(pnnx_test_exported_program_ir PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 target_compile_options(pnnx_test_exported_program_ir PRIVATE "${TORCH_CXX_FLAGS}")

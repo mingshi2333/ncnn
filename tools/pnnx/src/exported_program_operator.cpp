@@ -83,10 +83,15 @@ int parse_exported_aten_target(const std::string& target, ExportedAtenTarget& re
 
 bool is_exported_aten_target_supported(const ExportedAtenTarget& target)
 {
+    if (target.operator_name == "aten::add_" && target.overload_name == "Tensor")
+        return true;
+    if (target.operator_name == "aten::flatten" && target.overload_name == "using_ints")
+        return true;
+
     if (!target.overload_name.empty())
         return false;
 
-    return target.operator_name == "aten::linear" || target.operator_name == "aten::relu";
+    return target.operator_name == "aten::adaptive_avg_pool2d" || target.operator_name == "aten::batch_norm" || target.operator_name == "aten::conv2d" || target.operator_name == "aten::linear" || target.operator_name == "aten::max_pool2d" || target.operator_name == "aten::relu" || target.operator_name == "aten::relu_";
 }
 
 static std::string operator_context(const ExportedProgramHeader& header, const ExportedNode& node)

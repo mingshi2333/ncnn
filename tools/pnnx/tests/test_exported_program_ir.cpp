@@ -34,6 +34,47 @@ static pnnx::ExportedArgument make_tensor(const std::string& name)
     return value;
 }
 
+static pnnx::ExportedNamedArgument make_input(const std::string& name, const pnnx::ExportedArgument& value)
+{
+    pnnx::ExportedNamedArgument input;
+    input.name = name;
+    input.arg = value;
+    input.kind = pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL;
+    return input;
+}
+
+static pnnx::ExportedArgument make_bool(bool value)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_BOOL;
+    argument.bool_value = value;
+    return argument;
+}
+
+static pnnx::ExportedArgument make_float(double value)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_FLOAT;
+    argument.float_value = value;
+    return argument;
+}
+
+static pnnx::ExportedArgument make_int(int64_t value)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_INT;
+    argument.int_value = value;
+    return argument;
+}
+
+static pnnx::ExportedArgument make_ints(const std::vector<int64_t>& values)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_INT_LIST;
+    argument.int_values = values;
+    return argument;
+}
+
 static pnnx::ExportedNamedArgument make_input(const std::string& name, const std::string& tensor_name)
 {
     pnnx::ExportedNamedArgument input;
@@ -141,6 +182,292 @@ static pnnx::ExportedProgram make_linear_relu_program()
     return program;
 }
 
+static pnnx::ExportedProgram make_conv2d_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("p_conv_weight"));
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode conv;
+    conv.name = "conv2d";
+    conv.has_name = true;
+    conv.target = "torch.ops.aten.conv2d.default";
+    conv.inputs.push_back(make_input("input", make_tensor("x")));
+    conv.inputs.push_back(make_input("weight", make_tensor("p_conv_weight")));
+    conv.outputs.push_back(make_tensor("conv2d"));
+    program.graph.nodes.push_back(conv);
+    program.graph.outputs.push_back(make_tensor("conv2d"));
+
+    program.graph.tensor_values["p_conv_weight"] = make_tensor_meta(std::vector<int64_t>{3, 4, 3, 3});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 4, 8, 8});
+    program.graph.tensor_values["conv2d"] = make_tensor_meta(std::vector<int64_t>{1, 3, 6, 6});
+
+    pnnx::ExportedInputSpec weight;
+    weight.kind = pnnx::EXPORTED_PARAMETER;
+    weight.arg = make_tensor("p_conv_weight");
+    weight.target = "conv.weight";
+    program.input_specs.push_back(weight);
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("conv2d");
+    program.output_specs.push_back(output);
+
+    return program;
+}
+
+static pnnx::ExportedProgram make_batch_norm_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    const char* state_names[] = {"p_weight", "p_bias", "b_running_mean", "b_running_var"};
+    for (size_t i = 0; i < sizeof(state_names) / sizeof(state_names[0]); i++)
+        program.graph.inputs.push_back(make_tensor(state_names[i]));
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode batch_norm;
+    batch_norm.name = "batch_norm";
+    batch_norm.has_name = true;
+    batch_norm.target = "torch.ops.aten.batch_norm.default";
+    batch_norm.inputs.push_back(make_input("input", make_tensor("x")));
+    batch_norm.inputs.push_back(make_input("weight", make_tensor("p_weight")));
+    batch_norm.inputs.push_back(make_input("bias", make_tensor("p_bias")));
+    batch_norm.inputs.push_back(make_input("running_mean", make_tensor("b_running_mean")));
+    batch_norm.inputs.push_back(make_input("running_var", make_tensor("b_running_var")));
+    batch_norm.inputs.push_back(make_input("training", make_bool(false)));
+    batch_norm.inputs.push_back(make_input("momentum", make_float(0.1)));
+    batch_norm.inputs.push_back(make_input("eps", make_float(1e-5)));
+    batch_norm.inputs.push_back(make_input("cudnn_enabled", make_bool(false)));
+    batch_norm.outputs.push_back(make_tensor("batch_norm"));
+    program.graph.nodes.push_back(batch_norm);
+    program.graph.outputs.push_back(make_tensor("batch_norm"));
+
+    program.graph.tensor_values["p_weight"] = make_tensor_meta(std::vector<int64_t>{3});
+    program.graph.tensor_values["p_bias"] = make_tensor_meta(std::vector<int64_t>{3});
+    program.graph.tensor_values["b_running_mean"] = make_tensor_meta(std::vector<int64_t>{3});
+    program.graph.tensor_values["b_running_var"] = make_tensor_meta(std::vector<int64_t>{3});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 6, 6});
+    program.graph.tensor_values["batch_norm"] = make_tensor_meta(std::vector<int64_t>{1, 3, 6, 6});
+
+    const pnnx::ExportedInputKind state_kinds[] = {pnnx::EXPORTED_PARAMETER, pnnx::EXPORTED_PARAMETER, pnnx::EXPORTED_BUFFER, pnnx::EXPORTED_BUFFER};
+    const char* state_targets[] = {"weight", "bias", "running_mean", "running_var"};
+    for (size_t i = 0; i < sizeof(state_names) / sizeof(state_names[0]); i++)
+    {
+        pnnx::ExportedInputSpec state;
+        state.kind = state_kinds[i];
+        state.arg = make_tensor(state_names[i]);
+        state.target = state_targets[i];
+        state.persistent = true;
+        program.input_specs.push_back(state);
+    }
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("batch_norm");
+    program.output_specs.push_back(output);
+
+    return program;
+}
+
+static pnnx::ExportedProgram make_inplace_relu_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode relu;
+    relu.name = "relu_";
+    relu.has_name = true;
+    relu.target = "torch.ops.aten.relu_.default";
+    relu.inputs.push_back(make_input("self", make_tensor("x")));
+    relu.outputs.push_back(make_tensor("relu_"));
+    program.graph.nodes.push_back(relu);
+    program.graph.outputs.push_back(make_tensor("relu_"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{2, 3});
+    program.graph.tensor_values["relu_"] = make_tensor_meta(std::vector<int64_t>{2, 3});
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("relu_");
+    program.output_specs.push_back(output);
+    return program;
+}
+
+static pnnx::ExportedProgram make_max_pool2d_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode max_pool2d;
+    max_pool2d.name = "max_pool2d";
+    max_pool2d.has_name = true;
+    max_pool2d.target = "torch.ops.aten.max_pool2d.default";
+    max_pool2d.inputs.push_back(make_input("self", make_tensor("x")));
+    max_pool2d.inputs.push_back(make_input("kernel_size", make_ints(std::vector<int64_t>{3, 3})));
+    max_pool2d.inputs.push_back(make_input("stride", make_ints(std::vector<int64_t>{2, 2})));
+    max_pool2d.inputs.push_back(make_input("padding", make_ints(std::vector<int64_t>{1, 1})));
+    max_pool2d.inputs.push_back(make_input("dilation", make_ints(std::vector<int64_t>{1, 1})));
+    max_pool2d.inputs.push_back(make_input("ceil_mode", make_bool(false)));
+    max_pool2d.outputs.push_back(make_tensor("max_pool2d"));
+    program.graph.nodes.push_back(max_pool2d);
+    program.graph.outputs.push_back(make_tensor("max_pool2d"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 8, 8});
+    program.graph.tensor_values["max_pool2d"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("max_pool2d");
+    program.output_specs.push_back(output);
+    return program;
+}
+
+static pnnx::ExportedProgram make_inplace_add_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+    program.graph.inputs.push_back(make_tensor("other"));
+
+    pnnx::ExportedNode add;
+    add.name = "add_";
+    add.has_name = true;
+    add.target = "torch.ops.aten.add_.Tensor";
+    add.inputs.push_back(make_input("self", make_tensor("x")));
+    add.inputs.push_back(make_input("other", make_tensor("other")));
+    add.outputs.push_back(make_tensor("add_"));
+    program.graph.nodes.push_back(add);
+    program.graph.outputs.push_back(make_tensor("add_"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+    program.graph.tensor_values["other"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+    program.graph.tensor_values["add_"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+
+    const char* input_names[] = {"x", "other"};
+    for (size_t i = 0; i < sizeof(input_names) / sizeof(input_names[0]); i++)
+    {
+        pnnx::ExportedInputSpec input;
+        input.kind = pnnx::EXPORTED_USER_INPUT;
+        input.arg = make_tensor(input_names[i]);
+        program.input_specs.push_back(input);
+    }
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("add_");
+    program.output_specs.push_back(output);
+    return program;
+}
+
+static pnnx::ExportedProgram make_adaptive_avg_pool2d_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode adaptive_avg_pool2d;
+    adaptive_avg_pool2d.name = "adaptive_avg_pool2d";
+    adaptive_avg_pool2d.has_name = true;
+    adaptive_avg_pool2d.target = "torch.ops.aten.adaptive_avg_pool2d.default";
+    adaptive_avg_pool2d.inputs.push_back(make_input("self", make_tensor("x")));
+    adaptive_avg_pool2d.inputs.push_back(make_input("output_size", make_ints(std::vector<int64_t>{1, 1})));
+    adaptive_avg_pool2d.outputs.push_back(make_tensor("adaptive_avg_pool2d"));
+    program.graph.nodes.push_back(adaptive_avg_pool2d);
+    program.graph.outputs.push_back(make_tensor("adaptive_avg_pool2d"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 512, 7, 7});
+    program.graph.tensor_values["adaptive_avg_pool2d"] = make_tensor_meta(std::vector<int64_t>{1, 512, 1, 1});
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("adaptive_avg_pool2d");
+    program.output_specs.push_back(output);
+    return program;
+}
+
+static pnnx::ExportedProgram make_flatten_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode flatten;
+    flatten.name = "flatten";
+    flatten.has_name = true;
+    flatten.target = "torch.ops.aten.flatten.using_ints";
+    flatten.inputs.push_back(make_input("self", make_tensor("x")));
+    flatten.inputs.push_back(make_input("start_dim", make_int(1)));
+    flatten.inputs.push_back(make_input("end_dim", make_int(-1)));
+    flatten.outputs.push_back(make_tensor("flatten"));
+    program.graph.nodes.push_back(flatten);
+    program.graph.outputs.push_back(make_tensor("flatten"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 512, 1, 1});
+    program.graph.tensor_values["flatten"] = make_tensor_meta(std::vector<int64_t>{1, 512});
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("flatten");
+    program.output_specs.push_back(output);
+    return program;
+}
+
 static pnnx::Operator* find_operator(pnnx::Graph& graph, const std::string& type)
 {
     for (size_t i = 0; i < graph.ops.size(); i++)
@@ -241,6 +568,212 @@ static void test_linear_default_bias_constant()
 
     pnnx::pass_level2(graph);
     check(count_operator(graph, "F.linear") == 1, "linear default bias", "linear with None bias was not canonicalized");
+}
+
+static void test_conv2d_constant_arguments()
+{
+    const pnnx::ExportedProgram program = make_conv2d_program();
+    std::map<std::string, pnnx::MaterializedExportedTensor> state;
+    state["conv.weight"] = make_state_tensor(std::vector<int>{3, 4, 3, 3}, 432);
+
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, state, graph, error);
+
+    check(result == 0, "conv2d constants", "lowering failed: " + error);
+    check(error.empty(), "conv2d constants", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* conv = find_operator(graph, "aten::conv2d");
+    check(conv != 0, "conv2d constants", "missing aten::conv2d");
+    check(conv && conv->inputnames == std::vector<std::string>({"input", "weight", "bias", "stride", "padding", "dilation", "groups"}), "conv2d constants", "conv2d input names are not canonical");
+    check(conv && conv->inputs.size() == 7, "conv2d constants", "conv2d does not have seven inputs");
+    if (!conv || conv->inputs.size() != 7)
+        return;
+
+    const pnnx::Parameter& bias = conv->inputs[2]->producer->params.at("value");
+    const pnnx::Parameter& stride = conv->inputs[3]->producer->params.at("value");
+    const pnnx::Parameter& padding = conv->inputs[4]->producer->params.at("value");
+    const pnnx::Parameter& dilation = conv->inputs[5]->producer->params.at("value");
+    const pnnx::Parameter& groups = conv->inputs[6]->producer->params.at("value");
+    check(bias.type == 0, "conv2d constants", "bias default is not None");
+    check(stride.type == 5 && stride.ai == std::vector<int>({1, 1}), "conv2d constants", "stride default is wrong");
+    check(padding.type == 5 && padding.ai == std::vector<int>({0, 0}), "conv2d constants", "padding default is wrong");
+    check(dilation.type == 5 && dilation.ai == std::vector<int>({1, 1}), "conv2d constants", "dilation default is wrong");
+    check(groups.type == 2 && groups.i == 1, "conv2d constants", "groups default is wrong");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::conv2d") == 0 && count_operator(graph, "F.conv2d") == 1, "conv2d pass level2", "conv2d was not canonicalized");
+}
+
+static void test_batch_norm_constant_arguments()
+{
+    const pnnx::ExportedProgram program = make_batch_norm_program();
+    std::map<std::string, pnnx::MaterializedExportedTensor> state;
+    state["weight"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["bias"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["running_mean"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["running_var"] = make_state_tensor(std::vector<int>{3}, 12);
+
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, state, graph, error);
+
+    check(result == 0, "batch norm constants", "lowering failed: " + error);
+    check(error.empty(), "batch norm constants", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* batch_norm = find_operator(graph, "aten::batch_norm");
+    check(batch_norm != 0, "batch norm constants", "missing aten::batch_norm");
+    check(batch_norm && batch_norm->inputnames == std::vector<std::string>({"input", "weight", "bias", "running_mean", "running_var", "training", "momentum", "eps", "cudnn_enabled"}), "batch norm constants", "batch_norm input names are not canonical");
+    check(batch_norm && batch_norm->inputs.size() == 9, "batch norm constants", "batch_norm does not have nine inputs");
+    if (!batch_norm || batch_norm->inputs.size() != 9)
+        return;
+
+    const pnnx::Parameter& training = batch_norm->inputs[5]->producer->params.at("value");
+    const pnnx::Parameter& momentum = batch_norm->inputs[6]->producer->params.at("value");
+    const pnnx::Parameter& eps = batch_norm->inputs[7]->producer->params.at("value");
+    const pnnx::Parameter& cudnn_enabled = batch_norm->inputs[8]->producer->params.at("value");
+    check(training.type == 1 && !training.b, "batch norm constants", "training constant is wrong");
+    check(momentum.type == 3 && momentum.f == 0.1f, "batch norm constants", "momentum constant is wrong");
+    check(eps.type == 3 && eps.f == 1e-5f, "batch norm constants", "eps constant is wrong");
+    check(cudnn_enabled.type == 1 && !cudnn_enabled.b, "batch norm constants", "cudnn_enabled constant is wrong");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::batch_norm") == 0 && count_operator(graph, "F.batch_norm") == 1, "batch norm pass level2", "batch_norm was not canonicalized");
+}
+
+static void test_inplace_relu_is_functionalized_by_level2()
+{
+    const pnnx::ExportedProgram program = make_inplace_relu_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "inplace relu", "lowering failed: " + error);
+    check(error.empty(), "inplace relu", "success retained an error");
+    if (result != 0)
+        return;
+
+    check(count_operator(graph, "aten::relu_") == 1 && count_operator(graph, "aten::relu") == 0, "inplace relu", "importer did not preserve the inplace operator");
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::relu_") == 0 && count_operator(graph, "F.relu") == 1, "inplace relu pass level2", "relu_ was not functionalized and canonicalized");
+}
+
+static void test_max_pool2d_constant_arguments()
+{
+    const pnnx::ExportedProgram program = make_max_pool2d_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "max pool2d constants", "lowering failed: " + error);
+    check(error.empty(), "max pool2d constants", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* max_pool2d = find_operator(graph, "aten::max_pool2d");
+    check(max_pool2d != 0, "max pool2d constants", "missing aten::max_pool2d");
+    check(max_pool2d && max_pool2d->inputnames == std::vector<std::string>({"self", "kernel_size", "stride", "padding", "dilation", "ceil_mode"}), "max pool2d constants", "max_pool2d input names are not canonical");
+    check(max_pool2d && max_pool2d->inputs.size() == 6, "max pool2d constants", "max_pool2d does not have six inputs");
+    if (!max_pool2d || max_pool2d->inputs.size() != 6)
+        return;
+
+    const pnnx::Parameter& kernel_size = max_pool2d->inputs[1]->producer->params.at("value");
+    const pnnx::Parameter& stride = max_pool2d->inputs[2]->producer->params.at("value");
+    const pnnx::Parameter& padding = max_pool2d->inputs[3]->producer->params.at("value");
+    const pnnx::Parameter& dilation = max_pool2d->inputs[4]->producer->params.at("value");
+    const pnnx::Parameter& ceil_mode = max_pool2d->inputs[5]->producer->params.at("value");
+    check(kernel_size.type == 5 && kernel_size.ai == std::vector<int>({3, 3}), "max pool2d constants", "kernel_size constant is wrong");
+    check(stride.type == 5 && stride.ai == std::vector<int>({2, 2}), "max pool2d constants", "stride constant is wrong");
+    check(padding.type == 5 && padding.ai == std::vector<int>({1, 1}), "max pool2d constants", "padding constant is wrong");
+    check(dilation.type == 5 && dilation.ai == std::vector<int>({1, 1}), "max pool2d constants", "dilation constant is wrong");
+    check(ceil_mode.type == 1 && !ceil_mode.b, "max pool2d constants", "ceil_mode constant is wrong");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::max_pool2d") == 0 && count_operator(graph, "F.max_pool2d") == 1, "max pool2d pass level2", "max_pool2d was not canonicalized");
+}
+
+static void test_inplace_add_is_functionalized_by_level2()
+{
+    const pnnx::ExportedProgram program = make_inplace_add_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "inplace add", "lowering failed: " + error);
+    check(error.empty(), "inplace add", "success retained an error");
+    if (result != 0)
+        return;
+
+    check(count_operator(graph, "aten::add_") == 1 && count_operator(graph, "aten::add") == 0, "inplace add", "importer did not preserve the inplace operator");
+    pnnx::Operator* add = find_operator(graph, "aten::add_");
+    check(add && add->inputnames == std::vector<std::string>({"self", "other", "alpha"}), "inplace add", "add input names are not canonical");
+    check(add && add->inputs.size() == 3, "inplace add", "add does not have three inputs");
+    if (!add || add->inputs.size() != 3)
+        return;
+
+    const pnnx::Parameter& alpha = add->inputs[2]->producer->params.at("value");
+    check(alpha.type == 2 && alpha.i == 1, "inplace add", "alpha constant is wrong");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::add_") == 0 && count_operator(graph, "aten::add") == 1, "inplace add pass level2", "add_ was not functionalized");
+}
+
+static void test_adaptive_avg_pool2d_output_size()
+{
+    const pnnx::ExportedProgram program = make_adaptive_avg_pool2d_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "adaptive avg pool2d", "lowering failed: " + error);
+    check(error.empty(), "adaptive avg pool2d", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* adaptive_avg_pool2d = find_operator(graph, "aten::adaptive_avg_pool2d");
+    check(adaptive_avg_pool2d != 0, "adaptive avg pool2d", "missing aten::adaptive_avg_pool2d");
+    check(adaptive_avg_pool2d && adaptive_avg_pool2d->inputnames == std::vector<std::string>({"self", "output_size"}), "adaptive avg pool2d", "adaptive_avg_pool2d input names are not canonical");
+    check(adaptive_avg_pool2d && adaptive_avg_pool2d->inputs.size() == 2, "adaptive avg pool2d", "adaptive_avg_pool2d does not have two inputs");
+    if (!adaptive_avg_pool2d || adaptive_avg_pool2d->inputs.size() != 2)
+        return;
+
+    const pnnx::Parameter& output_size = adaptive_avg_pool2d->inputs[1]->producer->params.at("value");
+    check(output_size.type == 5 && output_size.ai == std::vector<int>({1, 1}), "adaptive avg pool2d", "output_size constant is wrong");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::adaptive_avg_pool2d") == 0 && count_operator(graph, "F.adaptive_avg_pool2d") == 1, "adaptive avg pool2d pass level2", "adaptive_avg_pool2d was not canonicalized");
+}
+
+static void test_flatten_dimensions()
+{
+    const pnnx::ExportedProgram program = make_flatten_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "flatten dimensions", "lowering failed: " + error);
+    check(error.empty(), "flatten dimensions", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* flatten = find_operator(graph, "aten::flatten");
+    check(flatten != 0, "flatten dimensions", "missing aten::flatten");
+    check(flatten && flatten->inputnames == std::vector<std::string>({"self", "start_dim", "end_dim"}), "flatten dimensions", "flatten input names are not canonical");
+    check(flatten && flatten->inputs.size() == 3, "flatten dimensions", "flatten does not have three inputs");
+    if (!flatten || flatten->inputs.size() != 3)
+        return;
+
+    const pnnx::Parameter& start_dim = flatten->inputs[1]->producer->params.at("value");
+    const pnnx::Parameter& end_dim = flatten->inputs[2]->producer->params.at("value");
+    check(start_dim.type == 2 && start_dim.i == 1, "flatten dimensions", "start_dim constant is wrong");
+    check(end_dim.type == 2 && end_dim.i == -1, "flatten dimensions", "end_dim constant is wrong");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::flatten") == 0 && count_operator(graph, "torch.flatten") == 1, "flatten pass level2", "flatten was not canonicalized");
 }
 
 static void expect_lower_error(const pnnx::ExportedProgram& program,
@@ -540,6 +1073,13 @@ int main(int argc, char** argv)
 
     test_linear_relu_graph();
     test_linear_default_bias_constant();
+    test_conv2d_constant_arguments();
+    test_batch_norm_constant_arguments();
+    test_inplace_relu_is_functionalized_by_level2();
+    test_max_pool2d_constant_arguments();
+    test_inplace_add_is_functionalized_by_level2();
+    test_adaptive_avg_pool2d_output_size();
+    test_flatten_dimensions();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();
     test_reject_invalid_graph_definitions();
