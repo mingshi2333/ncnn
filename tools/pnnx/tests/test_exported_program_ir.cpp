@@ -34,6 +34,14 @@ static pnnx::ExportedArgument make_tensor(const std::string& name)
     return value;
 }
 
+static pnnx::ExportedArgument make_tensors(const std::vector<std::string>& names)
+{
+    pnnx::ExportedArgument value;
+    value.type = pnnx::EXPORTED_ARGUMENT_TENSOR_LIST;
+    value.tensor_names = names;
+    return value;
+}
+
 static pnnx::ExportedNamedArgument make_input(const std::string& name, const pnnx::ExportedArgument& value)
 {
     pnnx::ExportedNamedArgument input;
@@ -468,6 +476,46 @@ static pnnx::ExportedProgram make_flatten_program()
     return program;
 }
 
+static pnnx::ExportedProgram make_cat_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+    program.graph.inputs.push_back(make_tensor("y"));
+
+    pnnx::ExportedNode cat;
+    cat.name = "cat";
+    cat.has_name = true;
+    cat.target = "torch.ops.aten.cat.default";
+    cat.inputs.push_back(make_input("tensors", make_tensors(std::vector<std::string>{"x", "y"})));
+    cat.inputs.push_back(make_input("dim", make_int(1)));
+    cat.outputs.push_back(make_tensor("cat"));
+    program.graph.nodes.push_back(cat);
+    program.graph.outputs.push_back(make_tensor("cat"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 2});
+    program.graph.tensor_values["y"] = make_tensor_meta(std::vector<int64_t>{1, 2});
+    program.graph.tensor_values["cat"] = make_tensor_meta(std::vector<int64_t>{1, 4});
+
+    const char* input_names[] = {"x", "y"};
+    for (size_t i = 0; i < sizeof(input_names) / sizeof(input_names[0]); i++)
+    {
+        pnnx::ExportedInputSpec input;
+        input.kind = pnnx::EXPORTED_USER_INPUT;
+        input.arg = make_tensor(input_names[i]);
+        program.input_specs.push_back(input);
+    }
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("cat");
+    program.output_specs.push_back(output);
+    return program;
+}
+
 static pnnx::Operator* find_operator(pnnx::Graph& graph, const std::string& type)
 {
     for (size_t i = 0; i < graph.ops.size(); i++)
@@ -794,6 +842,30 @@ static void test_dispatcher_backed_target_lowering()
     check(sigmoid && sigmoid->inputnames == std::vector<std::string>({"self"}), "dispatcher backed target", "sigmoid input names are not canonical");
 }
 
+static void test_tensor_list_argument_lowering()
+{
+    const pnnx::ExportedProgram program = make_cat_program();
+    pnnx::Graph graph;
+    std::string error;
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "tensor list argument", error);
+    if (result != 0)
+        return;
+
+    pnnx::Operator* list = find_operator(graph, "prim::ListConstruct");
+    pnnx::Operator* cat = find_operator(graph, "aten::cat");
+    check(list != 0, "tensor list argument", "missing prim::ListConstruct");
+    check(list && list->inputs.size() == 2 && list->inputs[0]->name == "x" && list->inputs[1]->name == "y", "tensor list argument", "tensor list inputs are out of order");
+    check(list && list->outputs.size() == 1 && list->outputs[0]->consumers.size() == 1 && list->outputs[0]->consumers[0] == cat, "tensor list argument", "tensor list output is not connected to cat");
+    check(cat != 0, "tensor list argument", "missing aten::cat");
+    check(cat && cat->inputnames == std::vector<std::string>({"tensors", "dim"}), "tensor list argument", "cat input names are not canonical");
+    check(cat && cat->inputs.size() == 2 && cat->inputs[0]->producer == list, "tensor list argument", "cat does not consume the tensor list");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::cat") == 0 && count_operator(graph, "torch.cat") == 1, "tensor list pass level2", "cat was not canonicalized");
+}
+
 static void expect_lower_error(const pnnx::ExportedProgram& program,
                                const std::map<std::string, pnnx::MaterializedExportedTensor>& state,
                                const std::string& expected_error,
@@ -895,6 +967,12 @@ static void test_reject_invalid_graph_definitions()
         pnnx::ExportedProgram program = make_linear_relu_program();
         program.graph.nodes[1].target = "aten::relu";
         expect_lower_error(program, make_linear_state(), "torch 2.12.1+cu126 aten opset 10 target aten::relu", "malformed operator context");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_cat_program();
+        program.graph.nodes[0].inputs[0].arg.tensor_names[1] = "missing";
+        expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unknown tensor value missing for tensor-list argument tensors", "unknown tensor-list member");
     }
 }
 
@@ -1093,6 +1171,7 @@ int main(int argc, char** argv)
     test_adaptive_avg_pool2d_output_size();
     test_flatten_dimensions();
     test_dispatcher_backed_target_lowering();
+    test_tensor_list_argument_lowering();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();
     test_reject_invalid_graph_definitions();

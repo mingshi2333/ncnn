@@ -379,6 +379,29 @@ int lower_exported_program(const ExportedProgram& program,
 
                 operand = value_it->second;
             }
+            else if (arguments[j].value.type == EXPORTED_ARGUMENT_TENSOR_LIST)
+            {
+                std::ostringstream list_name;
+                list_name << "pnnx_" << unknown_index++;
+                Operator* list = candidate.new_operator_before("prim::ListConstruct", unique_name(list_name.str(), operator_names), op);
+                operand = candidate.new_operand(unique_name(list_name.str(), operand_names));
+                operand->producer = list;
+                list->outputs.push_back(operand);
+
+                for (size_t k = 0; k < arguments[j].value.tensor_names.size(); k++)
+                {
+                    const std::string& tensor_name = arguments[j].value.tensor_names[k];
+                    const std::map<std::string, Operand*>::const_iterator value_it = values.find(tensor_name);
+                    if (value_it == values.end())
+                    {
+                        error = "unknown tensor value " + tensor_name + " for tensor-list argument " + arguments[j].name + " of " + node.target;
+                        return -1;
+                    }
+
+                    value_it->second->consumers.push_back(list);
+                    list->inputs.push_back(value_it->second);
+                }
+            }
             else
             {
                 std::ostringstream constant_name;
