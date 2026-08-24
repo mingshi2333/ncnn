@@ -52,6 +52,11 @@ jobs:
         pip3 install --user torch==${{ env.LIBTORCH_VERSION }} --index-url https://download.pytorch.org/whl/cpu
         pip3 install --user numpy packaging
 
+    - name: setup-pytorch-dll-path
+      if: matrix.os == 'windows-latest'
+      run: |
+        python3 -c "import os; from pathlib import Path; import torch; print(Path(torch.__file__).resolve().parent / 'lib', file=open(os.environ['GITHUB_PATH'], 'a'))"
+
     - name: build-pnnx
       run: |
         cd tools/pnnx
