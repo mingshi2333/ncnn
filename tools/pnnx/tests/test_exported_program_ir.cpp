@@ -1302,6 +1302,50 @@ static void test_float_list_argument_lowering()
     }
 }
 
+static void test_nearest_exact_vec_size_lowering()
+{
+    struct NearestExactCase
+    {
+        const char* target;
+        const char* aten_type;
+        const char* output_name;
+        std::vector<int64_t> output_size;
+    };
+
+    const NearestExactCase cases[] = {
+        {"torch.ops.aten._upsample_nearest_exact2d.vec", "aten::_upsample_nearest_exact2d", "upsample_nearest_exact2d", std::vector<int64_t>{11, 12}},
+        {"torch.ops.aten._upsample_nearest_exact3d.vec", "aten::_upsample_nearest_exact3d", "upsample_nearest_exact3d", std::vector<int64_t>{11, 12, 13}},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        const NearestExactCase& c = cases[i];
+        pnnx::ExportedProgram program = make_unary_program(
+            c.target, c.output_name,
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_input("output_size", make_ints(c.output_size)),
+                make_input("scale_factors", pnnx::ExportedArgument())});
+        program.graph.nodes[0].inputs[0].name = "input";
+
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "nearest exact vec size", error);
+        if (result == 0)
+        {
+            check(find_operator(graph, c.aten_type) != 0, "nearest exact vec size", "front end did not preserve the aten operator");
+
+            pnnx::pass_level2(graph);
+            pnnx::Operator* interpolate = find_operator(graph, "F.interpolate");
+            check(find_operator(graph, c.aten_type) == 0 && interpolate != 0, "nearest exact vec size pass level2", "nearest-exact operator was not canonicalized");
+            check(interpolate && interpolate->has_param("size") && interpolate->params.at("size").type == 5 && interpolate->params.at("size").ai == std::vector<int>(c.output_size.begin(), c.output_size.end()), "nearest exact vec size pass level2", "output size changed");
+            check(interpolate && interpolate->has_param("mode") && interpolate->params.at("mode").type == 4 && interpolate->params.at("mode").s == "nearest-exact", "nearest exact vec size pass level2", "interpolation mode changed");
+            check(interpolate && interpolate->has_param("recompute_scale_factor") && interpolate->params.at("recompute_scale_factor").type == 1 && !interpolate->params.at("recompute_scale_factor").b, "nearest exact vec size pass level2", "recompute_scale_factor changed");
+        }
+    }
+}
+
 static void test_avg_pool_empty_stride_normalization()
 {
     struct AvgPoolCase
@@ -1781,6 +1825,7 @@ int main(int argc, char** argv)
     test_device_argument_lowering();
     test_layout_argument_lowering();
     test_float_list_argument_lowering();
+    test_nearest_exact_vec_size_lowering();
     test_avg_pool_empty_stride_normalization();
     test_alias_elimination();
     test_lift_fresh_copy_lowering();
