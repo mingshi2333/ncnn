@@ -146,6 +146,7 @@ add_executable(pnnx_test_exported_program_ir
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_clone.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_flatten.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_ones_like.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_window.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_weight_norm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level3/fuse_op1ton_unpack.cpp
 )

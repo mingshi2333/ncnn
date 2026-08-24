@@ -296,6 +296,7 @@ set(pnnx_pass_level2_SRCS
     pass_level2/torch_view_as_complex.cpp
     pass_level2/torch_view_as_real.cpp
     pass_level2/torch_where.cpp
+    pass_level2/torch_window.cpp
     pass_level2/torch_zeros.cpp
     pass_level2/torch_zeros_like.cpp
     pass_level2/torch_stft.cpp

@@ -14,6 +14,7 @@
 #include "pass_level2/eliminate_size_numtotensor_int.h"
 #include "pass_level2/functionize.h"
 #include "pass_level2/fuse_constantlist.h"
+#include "pass_level2/torch_window.h"
 #include "pass_level2/torch_weight_norm.h"
 
 namespace pnnx {
@@ -1158,6 +1159,8 @@ void pass_level2(Graph& g)
             pnnx_graph_rewrite(g, rewriter, opindex);
         }
     }
+
+    fold_static_windows(g);
 }
 
 } // namespace pnnx
