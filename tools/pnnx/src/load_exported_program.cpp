@@ -3,6 +3,7 @@
 
 #include "load_exported_program.h"
 
+#include "exported_program_graph.h"
 #include "exported_program_operator.h"
 #include "pt2_archive.h"
 
@@ -410,7 +411,7 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
     return 0;
 }
 
-int lower_exported_program(const ExportedProgram& program,
+int lower_exported_program(const ExportedProgram& source_program,
                            const std::map<std::string, MaterializedExportedTensor>& state,
                            Graph& graph,
                            std::string& error)
@@ -421,6 +422,10 @@ int lower_exported_program(const ExportedProgram& program,
         error = "destination graph must be empty";
         return -1;
     }
+
+    ExportedProgram program = source_program;
+    if (normalize_exported_program_graph(source_program.graph, program.graph, error) != 0)
+        return -1;
 
     if (program.input_specs.size() != program.graph.inputs.size())
     {

@@ -106,6 +106,7 @@ add_test(
 add_executable(pnnx_test_exported_program_ir
     test_exported_program_ir.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/load_exported_program.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/exported_program_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/exported_program_operator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/exported_program_schema.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/exported_program_tensor.cpp

@@ -127,6 +127,15 @@ static pnnx::ExportedArgument make_device(const std::string& type, int64_t index
     return argument;
 }
 
+static pnnx::ExportedArgument make_graph(const std::string& name, const pnnx::ExportedGraph& graph)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_GRAPH;
+    argument.graph_name = name;
+    argument.graph_value.reset(new pnnx::ExportedGraph(graph));
+    return argument;
+}
+
 static pnnx::ExportedTreeSpec make_output_leaf()
 {
     pnnx::ExportedTreeSpec spec;
@@ -251,6 +260,99 @@ static pnnx::ExportedProgram make_linear_relu_program()
     pnnx::ExportedOutputSpec output;
     output.kind = pnnx::EXPORTED_USER_OUTPUT;
     output.arg = make_tensor("relu");
+    program.output_specs.push_back(output);
+
+    return program;
+}
+
+static pnnx::ExportedProgram make_higher_order_program(bool autocast_enabled = false)
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode neg;
+    neg.name = "neg";
+    neg.has_name = true;
+    neg.target = "torch.ops.aten.neg.default";
+    neg.inputs.push_back(make_input("self", "x"));
+    neg.outputs.push_back(make_tensor("inner_input"));
+    program.graph.nodes.push_back(neg);
+
+    pnnx::ExportedGraph autocast_graph;
+    autocast_graph.inputs.push_back(make_tensor("sub_input"));
+    pnnx::ExportedNode sigmoid;
+    sigmoid.name = "sigmoid";
+    sigmoid.has_name = true;
+    sigmoid.target = "torch.ops.aten.sigmoid.default";
+    sigmoid.inputs.push_back(make_input("self", "sub_input"));
+    sigmoid.outputs.push_back(make_tensor("sub_output"));
+    autocast_graph.nodes.push_back(sigmoid);
+    autocast_graph.outputs.push_back(make_tensor("sub_output"));
+    autocast_graph.tensor_values["sub_input"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    autocast_graph.tensor_values["sub_output"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+
+    pnnx::ExportedGraph grad_graph;
+    grad_graph.inputs.push_back(make_tensor("captured"));
+    pnnx::ExportedNode relu;
+    relu.name = "relu";
+    relu.has_name = true;
+    relu.target = "torch.ops.aten.relu.default";
+    relu.inputs.push_back(make_input("self", "captured"));
+    relu.outputs.push_back(make_tensor("inner_input"));
+    grad_graph.nodes.push_back(relu);
+
+    pnnx::ExportedNode metadata_assert;
+    metadata_assert.name = "metadata_assert";
+    metadata_assert.has_name = true;
+    metadata_assert.target = "torch.ops.aten._assert_tensor_metadata.default";
+    metadata_assert.inputs.push_back(make_input("a", "inner_input"));
+    grad_graph.nodes.push_back(metadata_assert);
+
+    pnnx::ExportedNode autocast;
+    autocast.name = "autocast";
+    autocast.has_name = true;
+    autocast.target = "torch.ops.higher_order.wrap_with_autocast";
+    autocast.inputs.push_back(make_input("", make_string("cpu")));
+    autocast.inputs.push_back(make_input("", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, 13)));
+    autocast.inputs.push_back(make_input("", make_bool(autocast_enabled)));
+    autocast.inputs.push_back(make_input("", make_bool(false)));
+    autocast.inputs.push_back(make_input("", make_graph("autocast_subgraph", autocast_graph)));
+    autocast.inputs.push_back(make_input("", make_tensor("inner_input")));
+    autocast.outputs.push_back(make_tensor("inner_output"));
+    grad_graph.nodes.push_back(autocast);
+    grad_graph.outputs.push_back(make_tensor("inner_output"));
+    grad_graph.tensor_values["captured"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    grad_graph.tensor_values["inner_input"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    grad_graph.tensor_values["inner_output"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+
+    pnnx::ExportedNode set_grad;
+    set_grad.name = "set_grad";
+    set_grad.has_name = true;
+    set_grad.target = "torch.ops.higher_order.wrap_with_set_grad_enabled";
+    set_grad.inputs.push_back(make_input("", make_bool(false)));
+    set_grad.inputs.push_back(make_input("", make_graph("grad_subgraph", grad_graph)));
+    set_grad.inputs.push_back(make_input("", make_tensor("inner_input")));
+    set_grad.outputs.push_back(make_tensor("z"));
+    program.graph.nodes.push_back(set_grad);
+
+    program.graph.outputs.push_back(make_tensor("z"));
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    program.graph.tensor_values["inner_input"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    program.graph.tensor_values["z"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("z");
     program.output_specs.push_back(output);
 
     return program;
@@ -773,6 +875,54 @@ static void test_linear_relu_graph()
     pnnx::pass_level2(graph);
     check(count_operator(graph, "aten::linear") == 0 && count_operator(graph, "F.linear") == 1, "linear relu pass level2", "linear was not canonicalized");
     check(count_operator(graph, "aten::relu") == 0 && count_operator(graph, "F.relu") == 1, "linear relu pass level2", "relu was not canonicalized");
+}
+
+static void test_higher_order_graph_lowering()
+{
+    const pnnx::ExportedProgram program = make_higher_order_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "higher order graph", "lowering failed: " + error);
+    check(error.empty(), "higher order graph", "success retained an error");
+    if (result != 0)
+        return;
+
+    check(graph.ops.size() == 5, "higher order graph", "wrong operator count");
+    check(count_operator(graph, "aten::neg") == 1, "higher order graph", "missing outer aten::neg");
+    check(count_operator(graph, "aten::relu") == 1, "higher order graph", "missing inlined aten::relu");
+    check(count_operator(graph, "aten::sigmoid") == 1, "higher order graph", "missing recursively inlined aten::sigmoid");
+    check(count_operator(graph, "aten::_assert_tensor_metadata") == 0, "higher order graph", "metadata assertion was not eliminated");
+
+    pnnx::Operator* neg = find_operator(graph, "aten::neg");
+    pnnx::Operator* relu = find_operator(graph, "aten::relu");
+    pnnx::Operator* sigmoid = find_operator(graph, "aten::sigmoid");
+    check(neg && neg->outputs.size() == 1 && neg->outputs[0]->name == "inner_input", "higher order graph", "outer value name changed");
+    check(relu && relu->inputs.size() == 1 && relu->inputs[0]->producer == neg, "higher order graph", "captured input was not bound to subgraph input");
+    check(relu && relu->outputs.size() == 1 && relu->outputs[0]->name != "inner_input", "higher order graph", "colliding subgraph value was not renamed");
+    check(sigmoid && sigmoid->inputs.size() == 1 && sigmoid->inputs[0]->producer == relu, "higher order graph", "nested subgraph input was not rebound");
+    check(sigmoid && sigmoid->outputs.size() == 1 && sigmoid->outputs[0]->name == "z", "higher order graph", "wrapper output mapping changed");
+    check(sigmoid && sigmoid->outputs.size() == 1 && sigmoid->outputs[0]->consumers.size() == 1 && sigmoid->outputs[0]->consumers[0]->type == "pnnx.Output", "higher order graph", "mapped wrapper output is not returned");
+
+    pnnx::ExportedProgram enabled_autocast = make_higher_order_program(true);
+    expect_lower_error(enabled_autocast, std::map<std::string, pnnx::MaterializedExportedTensor>(), "enabled autocast higher-order graph is unsupported", "enabled autocast graph");
+
+    pnnx::ExportedProgram enabled_set_grad = make_higher_order_program();
+    enabled_set_grad.graph.nodes[1].inputs[0].arg.bool_value = true;
+    expect_lower_error(enabled_set_grad, std::map<std::string, pnnx::MaterializedExportedTensor>(), "enabled set-grad higher-order graph is unsupported", "enabled set grad graph");
+
+    pnnx::ExportedProgram keyword_wrapper = make_higher_order_program();
+    keyword_wrapper.graph.nodes[1].inputs[0].kind = pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD;
+    expect_lower_error(keyword_wrapper, std::map<std::string, pnnx::MaterializedExportedTensor>(), "higher-order wrapper arguments must be positional", "keyword higher order wrapper");
+
+    pnnx::ExportedProgram missing_capture = make_higher_order_program();
+    missing_capture.graph.nodes[1].inputs.pop_back();
+    expect_lower_error(missing_capture, std::map<std::string, pnnx::MaterializedExportedTensor>(), "captured argument count does not match subgraph input count", "missing higher order capture");
+
+    pnnx::ExportedProgram mismatched_metadata = make_higher_order_program();
+    mismatched_metadata.graph.nodes[1].inputs[1].arg.graph_value->tensor_values["captured"] = make_tensor_meta(std::vector<int64_t>{1, 4});
+    expect_lower_error(mismatched_metadata, std::map<std::string, pnnx::MaterializedExportedTensor>(), "subgraph tensor metadata does not match bound value", "higher order metadata mismatch");
 }
 
 static void test_output_tree_lowering()
@@ -2309,6 +2459,7 @@ int main(int argc, char** argv)
         return 2;
 
     test_linear_relu_graph();
+    test_higher_order_graph_lowering();
     test_output_tree_lowering();
     test_linear_default_bias_constant();
     test_conv2d_constant_arguments();

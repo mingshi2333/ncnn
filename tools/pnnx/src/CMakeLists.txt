@@ -766,6 +766,7 @@ if(NOT MSVC)
 endif()
 
 set(pnnx_SRCS
+    exported_program_graph.cpp
     exported_program_schema.cpp
     exported_program_tensor.cpp
     load_exported_program.cpp
