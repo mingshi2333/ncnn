@@ -1066,6 +1066,69 @@ static void test_string_and_memory_format_argument_lowering()
     }
 }
 
+static void test_alias_elimination()
+{
+    {
+        const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.alias.default", "alias", std::vector<pnnx::ExportedNamedArgument>());
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "alias elimination", error);
+        if (result == 0)
+        {
+            check(count_operator(graph, "aten::alias") == 1, "alias elimination", "missing imported alias");
+            pnnx::pass_level2(graph);
+            check(count_operator(graph, "aten::alias") == 0, "alias elimination", "alias was not eliminated");
+
+            pnnx::Operator* input = find_operator(graph, "pnnx.Input");
+            pnnx::Operator* output = find_operator(graph, "pnnx.Output");
+            check(input && output && input->outputs.size() == 1 && output->inputs.size() == 1 && input->outputs[0] == output->inputs[0], "alias elimination", "alias consumers were not rewired to the source tensor");
+        }
+    }
+
+    {
+        pnnx::Graph graph;
+        pnnx::Operator* input = graph.new_operator("pnnx.Input", "input");
+        pnnx::Operand* x = graph.new_operand("x");
+        x->producer = input;
+        input->outputs.push_back(x);
+
+        pnnx::Operator* rhs_input = graph.new_operator("pnnx.Input", "rhs_input");
+        pnnx::Operand* rhs = graph.new_operand("rhs");
+        rhs->producer = rhs_input;
+        rhs_input->outputs.push_back(rhs);
+
+        pnnx::Operator* alias = graph.new_operator("aten::alias", "alias");
+        alias->inputs.push_back(x);
+        x->consumers.push_back(alias);
+        pnnx::Operand* y = graph.new_operand("y");
+        y->producer = alias;
+        alias->outputs.push_back(y);
+
+        pnnx::Operator* add = graph.new_operator("aten::add_", "add_");
+        add->inputs.push_back(y);
+        add->inputs.push_back(rhs);
+        y->consumers.push_back(add);
+        rhs->consumers.push_back(add);
+        pnnx::Operand* sum = graph.new_operand("sum");
+        sum->producer = add;
+        add->outputs.push_back(sum);
+
+        pnnx::Operator* output = graph.new_operator("pnnx.Output", "output");
+        output->inputs.push_back(x);
+        x->consumers.push_back(output);
+
+        pnnx::pass_level2(graph);
+
+        check(count_operator(graph, "aten::alias") == 0, "alias functionize", "alias was not eliminated after functionize");
+        check(count_operator(graph, "aten::add_") == 0 && count_operator(graph, "aten::add") == 1, "alias functionize", "in-place operator was not functionized");
+        pnnx::Operator* copy = find_operator(graph, "aten::copy");
+        output = find_operator(graph, "pnnx.Output");
+        check(copy && output && copy->outputs.size() == 1 && output->inputs.size() == 1 && output->inputs[0] == copy->outputs[0], "alias functionize", "mutation through alias was not propagated to the source tensor");
+    }
+}
+
 static void expect_lower_error(const pnnx::ExportedProgram& program,
                                const std::map<std::string, pnnx::MaterializedExportedTensor>& state,
                                const std::string& expected_error,
@@ -1385,6 +1448,7 @@ int main(int argc, char** argv)
     test_tensor_list_argument_lowering();
     test_tensor_list_output_lowering();
     test_string_and_memory_format_argument_lowering();
+    test_alias_elimination();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();
     test_reject_invalid_graph_definitions();

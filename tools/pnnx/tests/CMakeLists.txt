@@ -117,6 +117,7 @@ add_executable(pnnx_test_exported_program_ir
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/storezip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/eliminate_alias.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/eliminate_contiguous.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/eliminate_size_numtotensor_int.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/functionize.cpp

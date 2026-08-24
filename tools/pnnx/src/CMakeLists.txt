@@ -110,6 +110,7 @@ set(pnnx_pass_level1_SRCS
 )
 
 set(pnnx_pass_level2_SRCS
+    pass_level2/eliminate_alias.cpp
     pass_level2/eliminate_contiguous.cpp
     pass_level2/eliminate_size_numtotensor_int.cpp
     pass_level2/functionize.cpp
