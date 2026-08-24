@@ -75,6 +75,14 @@ static pnnx::ExportedArgument make_float(double value)
     return argument;
 }
 
+static pnnx::ExportedArgument make_floats(const std::vector<double>& values)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_FLOAT_LIST;
+    argument.float_values = values;
+    return argument;
+}
+
 static pnnx::ExportedArgument make_int(int64_t value)
 {
     pnnx::ExportedArgument argument;
@@ -1237,6 +1245,63 @@ static void test_layout_argument_lowering()
     }
 }
 
+static void test_float_list_argument_lowering()
+{
+    {
+        pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.upsample_nearest2d.vec", "upsample_nearest2d",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_input("output_size", pnnx::ExportedArgument()),
+                make_input("scale_factors", make_floats(std::vector<double>{2.0, 2.976744}))});
+        program.graph.nodes[0].inputs[0].name = "input";
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "float list argument", error);
+        if (result == 0)
+        {
+            pnnx::Operator* upsample = find_operator(graph, "aten::upsample_nearest2d");
+            check(upsample && upsample->inputnames == std::vector<std::string>({"input", "output_size", "scale_factors"}), "float list argument", "upsample input names are not canonical");
+            check(upsample && upsample->inputs.size() == 3 && upsample->inputs[2]->producer && upsample->inputs[2]->producer->has_param("value"), "float list argument", "scale_factors constant is missing");
+            if (upsample && upsample->inputs.size() == 3 && upsample->inputs[2]->producer && upsample->inputs[2]->producer->has_param("value"))
+            {
+                const pnnx::Parameter& scale_factors = upsample->inputs[2]->producer->params.at("value");
+                check(scale_factors.type == 6 && scale_factors.af == std::vector<float>({2.f, 2.976744f}), "float list argument", "scale_factors list changed");
+            }
+
+            pnnx::pass_level2(graph);
+            pnnx::Operator* functional_upsample = find_operator(graph, "F.upsample_nearest");
+            check(count_operator(graph, "aten::upsample_nearest2d") == 0 && functional_upsample != 0, "float list argument pass level2", "upsample was not canonicalized");
+            check(functional_upsample && functional_upsample->inputs.size() == 2 && functional_upsample->inputs[1]->producer && functional_upsample->inputs[1]->producer->has_param("value") && functional_upsample->inputs[1]->producer->params.at("value").type == 6 && functional_upsample->inputs[1]->producer->params.at("value").af == std::vector<float>({2.f, 2.976744f}), "float list argument pass level2", "canonical upsample lost scale_factors");
+        }
+    }
+
+    {
+        pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.upsample_nearest2d.vec", "upsample_nearest2d",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_input("output_size", pnnx::ExportedArgument()),
+                make_input("scale_factors", make_floats(std::vector<double>()))});
+        program.graph.nodes[0].inputs[0].name = "input";
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "empty float list argument", error);
+        if (result == 0)
+        {
+            pnnx::Operator* upsample = find_operator(graph, "aten::upsample_nearest2d");
+            check(upsample && upsample->inputs.size() == 3 && upsample->inputs[2]->producer && upsample->inputs[2]->producer->has_param("value"), "empty float list argument", "empty scale_factors constant is missing");
+            if (upsample && upsample->inputs.size() == 3 && upsample->inputs[2]->producer && upsample->inputs[2]->producer->has_param("value"))
+            {
+                const pnnx::Parameter& scale_factors = upsample->inputs[2]->producer->params.at("value");
+                check(scale_factors.type == 6 && scale_factors.af.empty(), "empty float list argument", "empty scale_factors list changed");
+            }
+        }
+    }
+}
+
 static void test_alias_elimination()
 {
     {
@@ -1645,6 +1710,7 @@ int main(int argc, char** argv)
     test_scalar_type_argument_lowering();
     test_device_argument_lowering();
     test_layout_argument_lowering();
+    test_float_list_argument_lowering();
     test_alias_elimination();
     test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();

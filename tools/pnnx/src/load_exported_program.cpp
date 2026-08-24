@@ -281,6 +281,13 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
         parameter.type = 3;
         parameter.f = (float)argument.float_value;
     }
+    else if (argument.type == EXPORTED_ARGUMENT_FLOAT_LIST)
+    {
+        parameter.type = 6;
+        parameter.af.reserve(argument.float_values.size());
+        for (size_t i = 0; i < argument.float_values.size(); i++)
+            parameter.af.push_back((float)argument.float_values[i]);
+    }
     else if (argument.type == EXPORTED_ARGUMENT_BOOL)
     {
         parameter.type = 1;
