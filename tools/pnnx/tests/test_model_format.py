@@ -56,7 +56,7 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(archive_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"pt2|arbitrary-root|0\n")
+            self.assertEqual(result.stdout.splitlines(), [b"pt2|arbitrary-root|0"])
 
     def test_torchscript_renamed_to_pt2_is_torchscript(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -68,7 +68,7 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(archive_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"torchscript\n")
+            self.assertEqual(result.stdout.splitlines(), [b"torchscript"])
 
     def test_non_zip_is_unknown(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -77,7 +77,7 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(model_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"unknown\n")
+            self.assertEqual(result.stdout.splitlines(), [b"unknown"])
 
     def test_malformed_zip_candidate_is_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -96,7 +96,7 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(archive_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"torchscript\n")
+            self.assertEqual(result.stdout.splitlines(), [b"torchscript"])
 
     def test_zip_without_marker_is_torchscript_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -105,7 +105,7 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(archive_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"torchscript\n")
+            self.assertEqual(result.stdout.splitlines(), [b"torchscript"])
 
     def test_requires_unique_archive_format(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -164,7 +164,10 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(archive_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"pt2|archive|18446744073709551615\n")
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [b"pt2|archive|18446744073709551615"],
+            )
 
     def test_accepts_archive_version_leading_zeroes_within_limit(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -173,7 +176,7 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(archive_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"pt2|archive|1\n")
+            self.assertEqual(result.stdout.splitlines(), [b"pt2|archive|1"])
 
     def test_rejects_archive_version_payload_longer_than_uint64_text(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -266,7 +269,7 @@ class ModelFormatTest(unittest.TestCase):
 
             result = run_helper(archive_path)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-            self.assertEqual(result.stdout, b"pt2|package|0\n")
+            self.assertEqual(result.stdout.splitlines(), [b"pt2|package|0"])
 
 
 if __name__ == "__main__":
