@@ -35,6 +35,33 @@ class LinearReluModel(torch.nn.Module):
         return torch.relu(self.linear(x))
 
 
+class GRUModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.recurrent = torch.nn.GRU(4, 3, batch_first=True)
+
+    def forward(self, x, hidden):
+        return self.recurrent(x, hidden)
+
+
+class LSTMModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.recurrent = torch.nn.LSTM(4, 3, batch_first=True)
+
+    def forward(self, x, hidden, cell):
+        return self.recurrent(x, (hidden, cell))
+
+
+class RNNModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.recurrent = torch.nn.RNN(4, 3, nonlinearity="relu", batch_first=True)
+
+    def forward(self, x, hidden):
+        return self.recurrent(x, hidden)
+
+
 class ExportedProgramIRTest(unittest.TestCase):
     def test_ir_unit_matrix(self):
         result = run_helper()
@@ -68,6 +95,35 @@ class ExportedProgramIRTest(unittest.TestCase):
                 "after-types|pnnx.Attribute,pnnx.Attribute,pnnx.Input,F.linear,F.relu,pnnx.Output",
             ],
         )
+
+    def test_real_recurrent_graphs(self):
+        cases = (
+            ("gru", GRUModel(), (torch.ones(2, 5, 4), torch.ones(1, 2, 3)), "nn.GRU"),
+            (
+                "lstm",
+                LSTMModel(),
+                (torch.ones(2, 5, 4), torch.ones(1, 2, 3), torch.ones(1, 2, 3)),
+                "nn.LSTM",
+            ),
+            ("rnn", RNNModel(), (torch.ones(2, 5, 4), torch.ones(1, 2, 3)), "nn.RNN"),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for name, model, inputs, expected_type in cases:
+                with self.subTest(name=name):
+                    archive_path = Path(temp_dir) / f"{name}.pt2"
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        exported_program = torch.export.export(model.eval(), inputs)
+                        torch.export.save(exported_program, archive_path)
+
+                    result = run_helper("inspect", archive_path)
+
+                    self.assertEqual(
+                        result.returncode, 0, result.stderr.decode(errors="replace")
+                    )
+                    after_types = result.stdout.decode().splitlines()[-1]
+                    self.assertIn(expected_type, after_types)
 
 
 if __name__ == "__main__":

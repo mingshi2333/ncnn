@@ -14,6 +14,7 @@
 #include "pass_level2/eliminate_size_numtotensor_int.h"
 #include "pass_level2/functionize.h"
 #include "pass_level2/fuse_constantlist.h"
+#include "pass_level2/fuse_recurrent.h"
 #include "pass_level2/torch_window.h"
 #include "pass_level2/torch_weight_norm.h"
 
@@ -1148,6 +1149,8 @@ void pass_level2(Graph& g)
     eliminate_size_numtotensor_int(g);
 
     fuse_constantlist(g);
+
+    fuse_recurrent(g);
 
     fold_static_weight_norm(g);
 
