@@ -324,6 +324,7 @@ set(pnnx_pass_level2_SRCS
     pass_level2/torchaudio_F_inverse_spectrogram.cpp
     pass_level2/torchaudio_F_spectrogram.cpp
 
+    pass_level2/nn_ChannelShuffle.cpp
     pass_level2/nn_GRU.cpp
     pass_level2/nn_LSTM.cpp
     pass_level2/nn_RNN.cpp

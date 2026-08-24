@@ -121,7 +121,7 @@ PT2_EXPECTATIONS = {
     "test_nn_BatchNorm2d": (PASS, ""),
     "test_nn_BatchNorm3d": (PASS, ""),
     "test_nn_CELU": (PASS, ""),
-    "test_nn_ChannelShuffle": (PNNX_LOWERING_UNSUPPORTED, "SyntaxError: invalid syntax"),
+    "test_nn_ChannelShuffle": (PASS, ""),
     "test_nn_ConstantPad1d": (PASS, ""),
     "test_nn_ConstantPad2d": (PASS, ""),
     "test_nn_ConstantPad3d": (PASS, ""),
