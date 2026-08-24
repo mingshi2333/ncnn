@@ -772,6 +772,79 @@ static void test_conv2d_constant_arguments()
     check(count_operator(graph, "aten::conv2d") == 0 && count_operator(graph, "F.conv2d") == 1, "conv2d pass level2", "conv2d was not canonicalized");
 }
 
+static void test_conv_nd_direct_lowering()
+{
+    struct ConvCase
+    {
+        const char* target;
+        const char* aten_type;
+        const char* canonical_type;
+        std::vector<int64_t> weight_shape;
+        std::vector<int64_t> input_shape;
+        std::vector<int64_t> output_shape;
+        std::vector<int> default_values;
+        bool string_padding;
+    };
+
+    const ConvCase cases[] = {
+        {"torch.ops.aten.conv1d.default", "aten::conv1d", "F.conv1d", std::vector<int64_t>{3, 4, 3}, std::vector<int64_t>{1, 4, 8}, std::vector<int64_t>{1, 3, 6}, std::vector<int>{1}, false},
+        {"torch.ops.aten.conv1d.padding", "aten::conv1d", "F.conv1d", std::vector<int64_t>{3, 4, 3}, std::vector<int64_t>{1, 4, 8}, std::vector<int64_t>{1, 3, 8}, std::vector<int>{1}, true},
+        {"torch.ops.aten.conv3d.default", "aten::conv3d", "F.conv3d", std::vector<int64_t>{3, 4, 3, 3, 3}, std::vector<int64_t>{1, 4, 8, 8, 8}, std::vector<int64_t>{1, 3, 6, 6, 6}, std::vector<int>{1, 1, 1}, false},
+        {"torch.ops.aten.conv3d.padding", "aten::conv3d", "F.conv3d", std::vector<int64_t>{3, 4, 3, 3, 3}, std::vector<int64_t>{1, 4, 8, 8, 8}, std::vector<int64_t>{1, 3, 8, 8, 8}, std::vector<int>{1, 1, 1}, true},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        const ConvCase& c = cases[i];
+        pnnx::ExportedProgram program = make_conv2d_program();
+        program.graph.nodes[0].target = c.target;
+        if (c.string_padding)
+            program.graph.nodes[0].inputs.push_back(make_keyword_input("padding", make_string("same")));
+        program.graph.tensor_values["p_conv_weight"] = make_tensor_meta(c.weight_shape);
+        program.graph.tensor_values["x"] = make_tensor_meta(c.input_shape);
+        program.graph.tensor_values["conv2d"] = make_tensor_meta(c.output_shape);
+
+        std::vector<int> weight_shape(c.weight_shape.begin(), c.weight_shape.end());
+        size_t weight_count = 1;
+        for (size_t j = 0; j < c.weight_shape.size(); j++)
+            weight_count *= (size_t)c.weight_shape[j];
+        std::map<std::string, pnnx::MaterializedExportedTensor> state;
+        state["conv.weight"] = make_state_tensor(weight_shape, weight_count * 4);
+
+        pnnx::Graph graph;
+        std::string error = "stale";
+        const int result = pnnx::lower_exported_program(program, state, graph, error);
+
+        check(result == 0, "conv nd direct", "lowering failed: " + error);
+        check(error.empty(), "conv nd direct", "success retained an error");
+        if (result != 0)
+            continue;
+
+        pnnx::Operator* conv = find_operator(graph, c.aten_type);
+        check(conv && conv->inputnames == std::vector<std::string>({"input", "weight", "bias", "stride", "padding", "dilation", "groups"}), "conv nd direct", "canonical argument names changed");
+        check(conv && conv->inputs.size() == 7, "conv nd direct", "conv does not have seven canonical inputs");
+        if (!conv || conv->inputs.size() != 7)
+            continue;
+
+        const pnnx::Parameter& stride = conv->inputs[3]->producer->params.at("value");
+        const pnnx::Parameter& padding = conv->inputs[4]->producer->params.at("value");
+        const pnnx::Parameter& dilation = conv->inputs[5]->producer->params.at("value");
+        check(stride.type == 5 && stride.ai == c.default_values, "conv nd direct", "stride default changed");
+        check(dilation.type == 5 && dilation.ai == c.default_values, "conv nd direct", "dilation default changed");
+        check(c.string_padding ? padding.type == 4 && padding.s == "same" : padding.type == 5 && padding.ai == std::vector<int>(c.default_values.size(), 0), "conv nd direct", "padding changed");
+
+        pnnx::pass_level2(graph);
+        pnnx::Operator* canonical = find_operator(graph, c.canonical_type);
+        check(find_operator(graph, c.aten_type) == 0 && canonical != 0, "conv nd direct pass level2", "direct convolution was not canonicalized");
+        check(canonical && canonical->inputnames == std::vector<std::string>({"input", "weight", "bias", "stride", "padding", "dilation", "groups"}) && canonical->inputs.size() == 7, "conv nd direct pass level2", "canonical inputs changed");
+        if (canonical && canonical->inputs.size() == 7)
+        {
+            const pnnx::Parameter& canonical_padding = canonical->inputs[4]->producer->params.at("value");
+            check(c.string_padding ? canonical_padding.type == 4 && canonical_padding.s == "same" : canonical_padding.type == 5 && canonical_padding.ai == std::vector<int>(c.default_values.size(), 0), "conv nd direct pass level2", "canonical padding changed");
+        }
+    }
+}
+
 static void test_batch_norm_constant_arguments()
 {
     const pnnx::ExportedProgram program = make_batch_norm_program();
@@ -1811,6 +1884,7 @@ int main(int argc, char** argv)
     test_linear_relu_graph();
     test_linear_default_bias_constant();
     test_conv2d_constant_arguments();
+    test_conv_nd_direct_lowering();
     test_batch_norm_constant_arguments();
     test_inplace_relu_is_functionalized_by_level2();
     test_max_pool2d_constant_arguments();
