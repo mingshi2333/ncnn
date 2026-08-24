@@ -193,6 +193,11 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_pt2_manifest.py
 )
 
+add_test(
+    NAME test_pnnx_test_utils
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_pnnx_test_utils.py
+)
+
 macro(pnnx_add_test name)
     add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPNNX_TEST_FORMAT=torchscript -DPNNX_EXECUTABLE=$<TARGET_FILE:pnnx> -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endmacro()

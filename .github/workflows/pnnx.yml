@@ -22,6 +22,7 @@ permissions:
 
 env:
   LIBTORCH_VERSION: 2.12.1
+  QUICK_TEST_TORCH_VERSION: 2.13.0
   TORCHVISION_VERSION: 0.27.1
   PROTOBUF_VERSION: 21.12
   ONNXRUNTIME_VERSION: 1.27.0
@@ -49,7 +50,7 @@ jobs:
     - name: setup-pytorch
       run: |
         python3 -m pip config set global.break-system-packages true
-        pip3 install --user torch==${{ env.LIBTORCH_VERSION }} --index-url https://download.pytorch.org/whl/cpu
+        pip3 install --user torch==${{ env.QUICK_TEST_TORCH_VERSION }} --index-url https://download.pytorch.org/whl/cpu
         pip3 install --user numpy packaging
 
     - name: setup-pytorch-dll-path

@@ -28,6 +28,7 @@ EXPECTED_SCHEMA_MINOR = {
     (2, 10): 15,
     (2, 11): 17,
     (2, 12): 20,
+    (2, 13): 20,
 }
 
 
@@ -200,7 +201,7 @@ class Pt2VersionCompatibilityTest(unittest.TestCase):
                 )
                 return
 
-            self.assertLessEqual(version, (2, 12, 1))
+            self.assertLessEqual(version, (2, 13, 0))
             result = run_pnnx(work_dir, archive_path)
             self.assertEqual(
                 result.returncode, 0, result.stderr.decode(errors="replace")
@@ -217,7 +218,7 @@ class Pt2VersionCompatibilityTest(unittest.TestCase):
 
     def test_real_default_argument_schema(self):
         version = self.require_pt2_producer()
-        if version < (2, 9, 0) or version > (2, 12, 1):
+        if version < (2, 9, 0) or version > (2, 13, 0):
             self.skipTest("default argument compatibility covers raw-payload producers")
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -264,7 +265,7 @@ class Pt2VersionCompatibilityTest(unittest.TestCase):
                 (
                     "future.pt2",
                     lambda document: document.update(
-                        torch_version="2.13.0",
+                        torch_version="2.14.0",
                         schema_version={"major": 8, "minor": 21},
                     ),
                     "untested torch producer version",
@@ -273,6 +274,14 @@ class Pt2VersionCompatibilityTest(unittest.TestCase):
                     "future_patch.pt2",
                     lambda document: document.update(
                         torch_version="2.12.2",
+                        schema_version={"major": 8, "minor": 20},
+                    ),
+                    "untested torch producer version",
+                ),
+                (
+                    "current_future_patch.pt2",
+                    lambda document: document.update(
+                        torch_version="2.13.1",
                         schema_version={"major": 8, "minor": 20},
                     ),
                     "untested torch producer version",

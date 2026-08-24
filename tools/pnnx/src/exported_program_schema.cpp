@@ -345,6 +345,8 @@ static int expected_schema_minor(const TorchProducerVersion& version)
         return 17;
     if (version.minor == 12)
         return 20;
+    if (version.minor == 13)
+        return 20;
 
     return -1;
 }
@@ -400,7 +402,7 @@ int parse_exported_program_header(const JsonValue& value, ExportedProgramHeader&
         return schema_error(error, "$.torch_version", "legacy exported program producer is unsupported");
     if (torch_version_value.major == 2 && torch_version_value.minor == 8)
         return schema_error(error, "$.torch_version", "PyTorch 2.8 legacy pickled-payload PT2 is unsupported");
-    if (torch_version_value.major != 2 || torch_version_value.minor > 12 || (torch_version_value.minor == 12 && torch_version_value.patch > 1))
+    if (torch_version_value.major != 2 || torch_version_value.minor > 13 || (torch_version_value.minor == 13 && torch_version_value.patch > 0) || (torch_version_value.minor == 12 && torch_version_value.patch > 1))
         return schema_error(error, "$.torch_version", "untested torch producer version");
 
     if (parsed_header.schema_major != 8)

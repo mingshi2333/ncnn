@@ -40,7 +40,11 @@ def _torch_version_tuple():
 
 def pt2_producer_status():
     version = _torch_version_tuple()
-    if version is None or version > (2, 12, 1):
+    if (
+        version is None
+        or version > (2, 13, 0)
+        or (version[:2] == (2, 12) and version[2] > 1)
+    ):
         return PT2_PRODUCER_VERSION_UNTESTED
     if version < (2, 9, 0):
         return LEGACY_PT2_UNSUPPORTED

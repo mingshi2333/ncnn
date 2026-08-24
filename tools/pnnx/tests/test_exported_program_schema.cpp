@@ -272,6 +272,7 @@ static void test_headers()
     expect_header(header_json(8, 15, "2.10.1+cpu"), 8, 15, "2.10.1+cpu", 10, "header torch 2.10");
     expect_header(header_json(8, 17, "2.11.0"), 8, 17, "2.11.0", 10, "header torch 2.11");
     expect_header(header_json(8, 20, "2.12.1+cu126", "\"aten\":10,\"custom\":3"), 8, 20, "2.12.1+cu126", 10, "header torch 2.12");
+    expect_header(header_json(8, 20, "2.13.0+cpu"), 8, 20, "2.13.0+cpu", 10, "header torch 2.13");
     expect_header(header_json(8, 20, "2.12.0a0+gitabcdef"), 8, 20, "2.12.0a0+gitabcdef", 10, "header nightly suffix");
 
     expect_header_error("[]", "$", "expected object", "header root type");
@@ -282,8 +283,9 @@ static void test_headers()
     expect_header_error("{\"schema_version\":{\"major\":8,\"minor\":20},\"opset_version\":{\"aten\":10}}", "$.torch_version", "missing required field", "header missing torch version");
     expect_header_error(header_json(8, 8, "2.8.0"), "$.torch_version", "legacy pickled-payload", "header legacy 2.8");
     expect_header_error(header_json(8, 7, "2.7.1"), "$.torch_version", "legacy exported program producer", "header legacy 2.7");
-    expect_header_error(header_json(8, 21, "2.13.0"), "$.torch_version", "untested torch producer", "header future producer");
+    expect_header_error(header_json(8, 21, "2.14.0"), "$.torch_version", "untested torch producer", "header future producer");
     expect_header_error(header_json(8, 20, "2.12.2"), "$.torch_version", "untested torch producer", "header future patch");
+    expect_header_error(header_json(8, 20, "2.13.1"), "$.torch_version", "untested torch producer", "header current future patch");
     expect_header_error(header_json(9, 1, "2.12.1"), "$.schema_version.major", "incompatible schema major", "header schema major");
     expect_header_error(header_json(8, 17, "2.12.1"), "$.schema_version.minor", "does not match torch producer", "header schema producer mismatch");
     expect_header_error(header_json(8, 20, "v2.12.1"), "$.torch_version", "invalid torch producer version", "header version prefix");

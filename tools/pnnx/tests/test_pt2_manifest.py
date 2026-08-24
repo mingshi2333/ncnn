@@ -23,6 +23,7 @@ INFRASTRUCTURE_TESTS = {
     "test_pt2_archive",
     "test_pt2_manifest",
     "test_pt2_version_compatibility",
+    "test_pnnx_test_utils",
     "test_storezip",
 }
 
