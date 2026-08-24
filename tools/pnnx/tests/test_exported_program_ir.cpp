@@ -1272,6 +1272,31 @@ static void test_dispatcher_backed_target_lowering()
     check(sigmoid && sigmoid->inputnames == std::vector<std::string>({"self"}), "dispatcher backed target", "sigmoid input names are not canonical");
 }
 
+static void test_none_output_lowering()
+{
+    pnnx::ExportedProgram program = make_linear_relu_program();
+
+    pnnx::ExportedNode item;
+    item.name = "item";
+    item.has_name = true;
+    item.target = "torch.ops.aten.item.default";
+    item.inputs.push_back(make_input("self", "relu"));
+    item.outputs.push_back(pnnx::ExportedArgument());
+    program.graph.nodes.push_back(item);
+
+    pnnx::Graph graph;
+    std::string error;
+    const int result = pnnx::lower_exported_program(program, make_linear_state(), graph, error);
+
+    check(result == 0, "none output", error);
+    if (result != 0)
+        return;
+
+    pnnx::Operator* item_op = find_operator(graph, "aten::item");
+    check(item_op != 0, "none output", "missing aten::item");
+    check(item_op && item_op->inputs.size() == 1 && item_op->outputs.empty(), "none output", "None output was materialized as a tensor");
+}
+
 static void test_tensor_list_argument_lowering()
 {
     const pnnx::ExportedProgram program = make_cat_program();
@@ -2223,6 +2248,7 @@ int main(int argc, char** argv)
     test_adaptive_avg_pool2d_output_size();
     test_flatten_dimensions();
     test_dispatcher_backed_target_lowering();
+    test_none_output_lowering();
     test_tensor_list_argument_lowering();
     test_tensor_list_output_lowering();
     test_string_and_memory_format_argument_lowering();

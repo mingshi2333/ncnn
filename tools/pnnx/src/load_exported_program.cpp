@@ -552,6 +552,9 @@ int lower_exported_program(const ExportedProgram& program,
                 continue;
             }
 
+            if (node.outputs[j].type == EXPORTED_ARGUMENT_NONE)
+                continue;
+
             error = "unsupported non-tensor output for " + node.target;
             return -1;
         }

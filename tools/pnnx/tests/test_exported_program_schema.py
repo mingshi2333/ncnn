@@ -83,6 +83,11 @@ class PrimitiveConstantInputsModel(torch.nn.Module):
         return x
 
 
+class NonFiniteFloatModel(torch.nn.Module):
+    def forward(self, x):
+        return torch.full_like(x, -float("inf"))
+
+
 class ExportedProgramSchemaTest(unittest.TestCase):
     def export_and_inspect(self, model, inputs, command="inspect"):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -202,6 +207,17 @@ class ExportedProgramSchemaTest(unittest.TestCase):
         self.assertIn("input|constant_input|enabled||0", lines)
         self.assertIn("input|constant_input|label||0", lines)
         self.assertIn("input|constant_input|missing||0", lines)
+
+    def test_real_nonfinite_float_argument(self):
+        result = self.export_and_inspect(
+            NonFiniteFloatModel(), (torch.ones(3),), command="inspect-graph"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        self.assertIn(
+            "node|full_like|torch.ops.aten.full_like.default|3|1",
+            result.stdout.decode().splitlines(),
+        )
 
 
 if __name__ == "__main__":

@@ -593,11 +593,28 @@ int parse_exported_payload_config(const JsonValue& value, ExportedPayloadConfig&
 
 static int read_double(const JsonValue& value, double& result, const std::string& path, ExportedSchemaError& error)
 {
-    if (value.type() != JSON_DOUBLE)
-        return schema_error(error, path, "expected float");
+    if (value.type() == JSON_DOUBLE)
+    {
+        result = value.as_double();
+        return 0;
+    }
 
-    result = value.as_double();
-    return 0;
+    if (value.type() == JSON_STRING)
+    {
+        const std::string& text = value.as_string();
+        if (text == "Infinity")
+            result = std::numeric_limits<double>::infinity();
+        else if (text == "-Infinity")
+            result = -std::numeric_limits<double>::infinity();
+        else if (text == "NaN")
+            result = std::numeric_limits<double>::quiet_NaN();
+        else
+            return schema_error(error, path, "unknown special float value");
+
+        return 0;
+    }
+
+    return schema_error(error, path, "expected float");
 }
 
 static int read_device(const JsonValue& value, ExportedDevice& device, const std::string& path, ExportedSchemaError& error)
@@ -794,12 +811,15 @@ static int read_static_sym_argument(const JsonValue& value, const std::string& s
     }
     if (it->first != static_tag)
         return schema_error(error, path, "unknown symbolic argument tag " + it->first);
+    if (static_type == JSON_DOUBLE)
+    {
+        double result = 0.0;
+        return read_double(it->second, result, path + "." + static_tag, error);
+    }
     if (it->second.type() != static_type)
     {
         if (static_type == JSON_INT64)
             return schema_error(error, path + "." + static_tag, "expected integer");
-        if (static_type == JSON_DOUBLE)
-            return schema_error(error, path + "." + static_tag, "expected float");
         return schema_error(error, path + "." + static_tag, "expected boolean");
     }
 
@@ -913,7 +933,8 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
         else if (tag == "as_sym_float")
         {
             argument.type = EXPORTED_ARGUMENT_FLOAT;
-            argument.float_value = static_value.as_double();
+            if (read_double(static_value, argument.float_value, tag_path + ".as_float", error) != 0)
+                return -1;
         }
         else
         {
@@ -953,7 +974,12 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
             if (tag == "as_sym_ints")
                 argument.int_values.push_back(static_value.as_int64());
             else if (tag == "as_sym_floats")
-                argument.float_values.push_back(static_value.as_double());
+            {
+                double item = 0.0;
+                if (read_double(static_value, item, item_path.str() + ".as_float", error) != 0)
+                    return -1;
+                argument.float_values.push_back(item);
+            }
             else
                 argument.bool_values.push_back(static_value.as_bool());
         }

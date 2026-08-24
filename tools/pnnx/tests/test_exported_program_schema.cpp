@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 
+#include <cmath>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -563,8 +564,20 @@ static void test_graph_arguments()
     if (parse_argument_case("{\"as_float\":1.25}", ",\"kind\":1", argument, kind, "argument float"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && argument.float_value == 1.25, "argument float", "float changed");
 
+    if (parse_argument_case("{\"as_float\":\"Infinity\"}", ",\"kind\":1", argument, kind, "argument positive infinity"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && std::isinf(argument.float_value) && argument.float_value > 0.0, "argument positive infinity", "positive infinity changed");
+
+    if (parse_argument_case("{\"as_float\":\"-Infinity\"}", ",\"kind\":1", argument, kind, "argument negative infinity"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && std::isinf(argument.float_value) && argument.float_value < 0.0, "argument negative infinity", "negative infinity changed");
+
+    if (parse_argument_case("{\"as_float\":\"NaN\"}", ",\"kind\":1", argument, kind, "argument nan"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && std::isnan(argument.float_value), "argument nan", "nan changed");
+
     if (parse_argument_case("{\"as_floats\":[1.5,-2.25]}", ",\"kind\":1", argument, kind, "argument float list"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST && argument.float_values.size() == 2 && argument.float_values[1] == -2.25, "argument float list", "float list changed");
+
+    if (parse_argument_case("{\"as_floats\":[\"Infinity\",\"-Infinity\",\"NaN\"]}", ",\"kind\":1", argument, kind, "argument special float list"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST && argument.float_values.size() == 3 && std::isinf(argument.float_values[0]) && argument.float_values[0] > 0.0 && std::isinf(argument.float_values[1]) && argument.float_values[1] < 0.0 && std::isnan(argument.float_values[2]), "argument special float list", "special float list changed");
 
     if (parse_argument_case("{\"as_bool\":true}", ",\"kind\":1", argument, kind, "argument bool"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_BOOL && argument.bool_value, "argument bool", "bool changed");
@@ -599,8 +612,14 @@ static void test_graph_arguments()
     if (parse_argument_case("{\"as_sym_float\":{\"as_float\":1.5}}", ",\"kind\":1", argument, kind, "argument static sym float"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && argument.float_value == 1.5, "argument static sym float", "static sym float changed");
 
+    if (parse_argument_case("{\"as_sym_float\":{\"as_float\":\"-Infinity\"}}", ",\"kind\":1", argument, kind, "argument static sym negative infinity"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && std::isinf(argument.float_value) && argument.float_value < 0.0, "argument static sym negative infinity", "static sym negative infinity changed");
+
     if (parse_argument_case("{\"as_sym_floats\":[{\"as_float\":1.5},{\"as_float\":2.5}]}", ",\"kind\":1", argument, kind, "argument static sym floats"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST && argument.float_values.size() == 2 && argument.float_values[1] == 2.5, "argument static sym floats", "static sym floats changed");
+
+    if (parse_argument_case("{\"as_sym_floats\":[{\"as_float\":\"Infinity\"},{\"as_float\":\"NaN\"}]}", ",\"kind\":1", argument, kind, "argument static sym special floats"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST && argument.float_values.size() == 2 && std::isinf(argument.float_values[0]) && argument.float_values[0] > 0.0 && std::isnan(argument.float_values[1]), "argument static sym special floats", "static sym special floats changed");
 
     if (parse_argument_case("{\"as_sym_bool\":{\"as_bool\":false}}", ",\"kind\":1", argument, kind, "argument static sym bool"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_BOOL && !argument.bool_value, "argument static sym bool", "static sym bool changed");
@@ -652,6 +671,10 @@ static void test_graph_arguments()
     fixture = ProgramFixture();
     fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_ints\":[1,true]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
     expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_ints[1]", "expected integer", "argument list item type");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_float\":\"infinity\"},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_float", "unknown special float value", "argument invalid special float");
 
     fixture = ProgramFixture();
     fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_int\":1},\"kind\":3}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
