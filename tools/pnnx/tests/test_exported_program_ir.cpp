@@ -1129,6 +1129,29 @@ static void test_alias_elimination()
     }
 }
 
+static void test_lift_fresh_copy_lowering()
+{
+    const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.lift_fresh_copy.default", "lift_fresh_copy", std::vector<pnnx::ExportedNamedArgument>());
+    pnnx::Graph graph;
+    std::string error;
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "lift fresh copy lowering", error);
+    if (result == 0)
+    {
+        check(count_operator(graph, "aten::lift_fresh_copy") == 1, "lift fresh copy lowering", "missing imported lift_fresh_copy");
+        pnnx::pass_level2(graph);
+        check(count_operator(graph, "aten::lift_fresh_copy") == 0, "lift fresh copy lowering", "lift_fresh_copy was not lowered");
+
+        pnnx::Operator* clone = find_operator(graph, "torch.clone");
+        check(clone && clone->has_param("memory_format") && clone->params.at("memory_format").s == "torch.contiguous_format", "lift fresh copy lowering", "lift_fresh_copy was not lowered to a contiguous fresh clone");
+
+        pnnx::Operator* input = find_operator(graph, "pnnx.Input");
+        pnnx::Operator* output = find_operator(graph, "pnnx.Output");
+        check(input && clone && output && input->outputs.size() == 1 && clone->inputs.size() == 1 && clone->outputs.size() == 1 && output->inputs.size() == 1 && clone->inputs[0] == input->outputs[0] && output->inputs[0] == clone->outputs[0], "lift fresh copy lowering", "clone wiring does not preserve the fresh-copy dataflow");
+    }
+}
+
 static void expect_lower_error(const pnnx::ExportedProgram& program,
                                const std::map<std::string, pnnx::MaterializedExportedTensor>& state,
                                const std::string& expected_error,
@@ -1449,6 +1472,7 @@ int main(int argc, char** argv)
     test_tensor_list_output_lowering();
     test_string_and_memory_format_argument_lowering();
     test_alias_elimination();
+    test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();
     test_reject_invalid_graph_definitions();
