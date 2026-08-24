@@ -18,8 +18,8 @@ from pathlib import Path
 import torch
 
 
-PNNX = Path(sys.argv[1]).resolve()
-sys.argv = [sys.argv[0]]
+PNNX = Path(sys.argv.pop(1)).resolve()
+PNNX_TIMEOUT_SECONDS = 180
 
 
 class TinyModel(torch.nn.Module):
@@ -84,13 +84,22 @@ class SharedStorageLinearModel(torch.nn.Module):
 
 
 def run_pnnx(work_dir, model_path):
-    return subprocess.run(
-        [str(PNNX), model_path.name],
-        cwd=work_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            [str(PNNX), model_path.name],
+            cwd=work_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=PNNX_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        stdout = (error.stdout or b"").decode(errors="replace")
+        stderr = (error.stderr or b"").decode(errors="replace")
+        raise AssertionError(
+            f"pnnx timed out after {PNNX_TIMEOUT_SECONDS} seconds\n"
+            f"stdout:\n{stdout}\nstderr:\n{stderr}"
+        ) from error
 
 
 def save_exported_program(model, archive_path):
@@ -193,6 +202,14 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
         self.assertFalse((work_dir / f"{model_path.stem}.pnnx.bin").exists())
         self.assertFalse((work_dir / f"{model_path.stem}_pnnx.py").exists())
 
+    def test_tiny_exported_program_converts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+            pt2_path = work_dir / "tiny.pt2"
+
+            save_exported_program(self.model, pt2_path)
+            self.assert_conversion_matches(work_dir, pt2_path)
+
     def test_exported_program_routes_by_archive_content(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             work_dir = Path(temp_dir)
@@ -202,7 +219,6 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
             save_exported_program(self.model, pt2_path)
             shutil.copyfile(pt2_path, renamed_path)
 
-            self.assert_conversion_matches(work_dir, pt2_path)
             self.assert_conversion_matches(work_dir, renamed_path)
 
     def test_torchscript_with_pt2_suffix_still_uses_torchscript_loader(self):

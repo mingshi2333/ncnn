@@ -66,9 +66,13 @@ jobs:
         cd build && ctest -C Release --output-on-failure -R test_nn_Conv
 
     - name: exported-program-smoke-test
+      env:
+        OMP_THREAD_LIMIT: 1
+        OMP_NUM_THREADS: 1
+        MKL_NUM_THREADS: 1
       run: |
         cd tools/pnnx/build
-        ctest -C Release --output-on-failure -R "test_(storezip|model_format|json_reader|pt2_archive|exported_program)$"
+        ctest -C Release --output-on-failure -R "test_(storezip|model_format|json_reader|pt2_archive|exported_program_smoke)$"
 
   build:
     runs-on: [self-hosted, linux, ubuntu25]

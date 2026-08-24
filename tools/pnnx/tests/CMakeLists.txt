@@ -174,6 +174,11 @@ add_test(
 )
 
 add_test(
+    NAME test_exported_program_smoke
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program.py $<TARGET_FILE:pnnx> ExportedProgramEndToEndTest.test_tiny_exported_program_converts
+)
+
+add_test(
     NAME test_exported_program_roundtrip
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program_roundtrip.py $<TARGET_FILE:pnnx>
 )
