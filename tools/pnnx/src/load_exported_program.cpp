@@ -42,19 +42,121 @@ static bool is_symbol_name(const std::string& value)
 static bool parse_plain_integer_symbol(const std::string& expression, std::string& symbol)
 {
     const std::string prefix = "Symbol('";
-    const std::string suffix = "', integer=True)";
-    if (expression.size() <= prefix.size() + suffix.size())
-        return false;
-    if (expression.compare(0, prefix.size(), prefix) != 0)
-        return false;
-    if (expression.compare(expression.size() - suffix.size(), suffix.size(), suffix) != 0)
+    if (expression.size() <= prefix.size() + 2 || expression.compare(0, prefix.size(), prefix) != 0)
         return false;
 
-    symbol = expression.substr(prefix.size(), expression.size() - prefix.size() - suffix.size());
-    return is_symbol_name(symbol);
+    const size_t name_end = expression.find('\'', prefix.size());
+    if (name_end == std::string::npos)
+        return false;
+    symbol = expression.substr(prefix.size(), name_end - prefix.size());
+    if (!is_symbol_name(symbol))
+        return false;
+
+    bool integer = false;
+    std::set<std::string> assumptions;
+    size_t cursor = name_end + 1;
+    while (cursor < expression.size())
+    {
+        if (expression[cursor] == ')' && cursor + 1 == expression.size())
+            return integer;
+        if (cursor + 2 > expression.size() || expression.compare(cursor, 2, ", ") != 0)
+            return false;
+        cursor += 2;
+
+        const size_t equal = expression.find('=', cursor);
+        if (equal == std::string::npos)
+            return false;
+        const std::string key = expression.substr(cursor, equal - cursor);
+        if (!is_symbol_name(key) || !assumptions.insert(key).second)
+            return false;
+
+        cursor = equal + 1;
+        bool value = false;
+        if (expression.compare(cursor, 4, "True") == 0)
+        {
+            value = true;
+            cursor += 4;
+        }
+        else if (expression.compare(cursor, 5, "False") == 0)
+        {
+            cursor += 5;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (key == "integer")
+            integer = value;
+    }
+
+    return false;
 }
 
-static int resolve_tensor_size(const ExportedProgram& program, const std::string& name, size_t dimension, const ExportedSymInt& size, int& resolved, std::string& error)
+static bool expression_uses_symbol(const std::string& expression, const std::string& symbol)
+{
+    const std::string needle = "Symbol('" + symbol + "'";
+    return expression.find(needle) != std::string::npos;
+}
+
+static bool collect_expression_symbols(const std::string& expression, std::set<std::string>& symbols)
+{
+    static const std::string prefix = "Symbol('";
+
+    bool found = false;
+    size_t cursor = 0;
+    for (;;)
+    {
+        const size_t begin = expression.find(prefix, cursor);
+        if (begin == std::string::npos)
+            return found;
+
+        const size_t name_begin = begin + prefix.size();
+        const size_t name_end = expression.find('\'', name_begin);
+        if (name_end == std::string::npos)
+            return false;
+
+        const std::string symbol = expression.substr(name_begin, name_end - name_begin);
+        if (!is_symbol_name(symbol))
+            return false;
+
+        symbols.insert(symbol);
+        found = true;
+        cursor = name_end + 1;
+    }
+}
+
+static int collect_dynamic_input_symbols(const ExportedProgram& program, std::set<std::string>& symbols, std::string& error)
+{
+    for (size_t i = 0; i < program.input_specs.size(); i++)
+    {
+        const ExportedInputSpec& spec = program.input_specs[i];
+        if (spec.kind != EXPORTED_USER_INPUT || spec.arg.type != EXPORTED_ARGUMENT_TENSOR)
+            continue;
+
+        const std::map<std::string, ExportedTensorMeta>::const_iterator meta_it = program.graph.tensor_values.find(spec.arg.name);
+        if (meta_it == program.graph.tensor_values.end())
+            continue;
+
+        for (size_t j = 0; j < meta_it->second.sizes.size(); j++)
+        {
+            const ExportedSymInt& size = meta_it->second.sizes[j];
+            if (size.type != EXPORTED_SYM_INT_EXPRESSION)
+                continue;
+            if (!collect_expression_symbols(size.expression, symbols))
+            {
+                std::ostringstream message;
+                message << "tensor " << spec.arg.name << " has unsupported symbolic input size " << size.expression << " at dimension " << j;
+                error = message.str();
+                return -1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int resolve_tensor_size(const ExportedProgram& program, const std::set<std::string>& dynamic_input_symbols, const std::string& name, size_t dimension, const ExportedSymInt& size, int& resolved, std::string& error)
 {
     if (size.type == EXPORTED_SYM_INT_STATIC)
     {
@@ -73,6 +175,15 @@ static int resolve_tensor_size(const ExportedProgram& program, const std::string
 
         resolved = (int)size.value;
         return 0;
+    }
+
+    for (std::set<std::string>::const_iterator it = dynamic_input_symbols.begin(); it != dynamic_input_symbols.end(); ++it)
+    {
+        if (expression_uses_symbol(size.expression, *it))
+        {
+            resolved = -1;
+            return 0;
+        }
     }
 
     std::string symbol;
@@ -104,7 +215,7 @@ static int resolve_tensor_size(const ExportedProgram& program, const std::string
     return 0;
 }
 
-static int set_tensor_metadata(const ExportedProgram& program, const std::string& name, Operand* operand, std::string& error)
+static int set_tensor_metadata(const ExportedProgram& program, const std::set<std::string>& dynamic_input_symbols, const std::string& name, Operand* operand, std::string& error)
 {
     const std::map<std::string, ExportedTensorMeta>::const_iterator meta_it = program.graph.tensor_values.find(name);
     if (meta_it == program.graph.tensor_values.end())
@@ -135,7 +246,7 @@ static int set_tensor_metadata(const ExportedProgram& program, const std::string
     for (size_t i = 0; i < meta.sizes.size(); i++)
     {
         int resolved = 0;
-        if (resolve_tensor_size(program, name, i, meta.sizes[i], resolved, error) != 0)
+        if (resolve_tensor_size(program, dynamic_input_symbols, name, i, meta.sizes[i], resolved, error) != 0)
             return -1;
         shape.push_back(resolved);
     }
@@ -492,6 +603,29 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
     return 0;
 }
 
+static void normalize_exported_slice_arguments(const ExportedAtenTarget& target, std::vector<CanonicalExportedArgument>& arguments)
+{
+    if (target.operator_name != "aten::slice" || target.overload_name != "Tensor")
+        return;
+
+    for (size_t i = 0; i < arguments.size(); i++)
+    {
+        if (arguments[i].value.type != EXPORTED_ARGUMENT_NONE)
+            continue;
+
+        if (arguments[i].name == "start")
+        {
+            arguments[i].value.type = EXPORTED_ARGUMENT_INT;
+            arguments[i].value.int_value = 0;
+        }
+        else if (arguments[i].name == "end")
+        {
+            arguments[i].value.type = EXPORTED_ARGUMENT_INT;
+            arguments[i].value.int_value = std::numeric_limits<int64_t>::max();
+        }
+    }
+}
+
 int lower_exported_program(const ExportedProgram& source_program,
                            const std::map<std::string, MaterializedExportedTensor>& state,
                            Graph& graph,
@@ -534,6 +668,10 @@ int lower_exported_program(const ExportedProgram& source_program,
         }
     }
 
+    std::set<std::string> dynamic_input_symbols;
+    if (collect_dynamic_input_symbols(program, dynamic_input_symbols, error) != 0)
+        return -1;
+
     Graph candidate;
     std::map<std::string, Operand*> values;
     std::set<std::string> operand_names;
@@ -566,7 +704,7 @@ int lower_exported_program(const ExportedProgram& source_program,
             operand_names.insert(name);
             operand->producer = op;
             op->outputs.push_back(operand);
-            if (set_tensor_metadata(program, name, operand, error) != 0)
+            if (set_tensor_metadata(program, dynamic_input_symbols, name, operand, error) != 0)
                 return -1;
             if (state_it->second.pnnx_type != operand->type)
             {
@@ -595,7 +733,7 @@ int lower_exported_program(const ExportedProgram& source_program,
         operand_names.insert(name);
         operand->producer = op;
         op->outputs.push_back(operand);
-        if (set_tensor_metadata(program, name, operand, error) != 0)
+        if (set_tensor_metadata(program, dynamic_input_symbols, name, operand, error) != 0)
             return -1;
         values[name] = operand;
     }
@@ -610,6 +748,7 @@ int lower_exported_program(const ExportedProgram& source_program,
         ExportedAtenTarget target;
         if (parse_exported_aten_target(node.target, target, error) != 0)
             return -1;
+        normalize_exported_slice_arguments(target, arguments);
 
         std::ostringstream generated_name;
         if (!node.has_name)
@@ -620,12 +759,13 @@ int lower_exported_program(const ExportedProgram& source_program,
         for (size_t j = 0; j < arguments.size(); j++)
         {
             Operand* operand = 0;
-            if (arguments[j].value.type == EXPORTED_ARGUMENT_TENSOR)
+            if (arguments[j].value.type == EXPORTED_ARGUMENT_TENSOR || arguments[j].value.type == EXPORTED_ARGUMENT_SYMBOLIC_INT)
             {
                 const std::map<std::string, Operand*>::const_iterator value_it = values.find(arguments[j].value.name);
                 if (value_it == values.end())
                 {
-                    error = "unknown tensor value " + arguments[j].value.name + " for " + node.target;
+                    const char* value_kind = arguments[j].value.type == EXPORTED_ARGUMENT_TENSOR ? "tensor" : "symbolic integer";
+                    error = std::string("unknown ") + value_kind + " value " + arguments[j].value.name + " for " + node.target;
                     return -1;
                 }
 
@@ -690,8 +830,24 @@ int lower_exported_program(const ExportedProgram& source_program,
                 operand_names.insert(name);
                 operand->producer = op;
                 op->outputs.push_back(operand);
-                if (set_tensor_metadata(program, name, operand, error) != 0)
+                if (set_tensor_metadata(program, dynamic_input_symbols, name, operand, error) != 0)
                     return -1;
+                values[name] = operand;
+                continue;
+            }
+
+            if (node.outputs[j].type == EXPORTED_ARGUMENT_SYMBOLIC_INT)
+            {
+                const std::string& name = node.outputs[j].name;
+                if (values.find(name) != values.end())
+                {
+                    error = "symbolic integer value " + name + " is defined more than once";
+                    return -1;
+                }
+                Operand* operand = candidate.new_operand(name);
+                operand_names.insert(name);
+                operand->producer = op;
+                op->outputs.push_back(operand);
                 values[name] = operand;
                 continue;
             }
@@ -719,7 +875,7 @@ int lower_exported_program(const ExportedProgram& source_program,
                     operand_names.insert(name);
                     operand->producer = unpack;
                     unpack->outputs.push_back(operand);
-                    if (set_tensor_metadata(program, name, operand, error) != 0)
+                    if (set_tensor_metadata(program, dynamic_input_symbols, name, operand, error) != 0)
                         return -1;
                     values[name] = operand;
                 }

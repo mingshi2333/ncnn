@@ -398,6 +398,80 @@ static pnnx::ExportedProgram make_bounded_dynamic_result_program(bool legacy_ran
     return program;
 }
 
+static pnnx::ExportedProgram make_dynamic_input_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.13.0+cpu";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode sym_size;
+    sym_size.name = "sym_size_int";
+    sym_size.has_name = true;
+    sym_size.target = "torch.ops.aten.sym_size.int";
+    sym_size.inputs.push_back(make_input("self", "x"));
+    sym_size.inputs.push_back(make_input("dim", make_int(1)));
+    sym_size.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sym_size_int"));
+    program.graph.nodes.push_back(sym_size);
+
+    pnnx::ExportedNode floor_divide;
+    floor_divide.name = "floordiv";
+    floor_divide.has_name = true;
+    floor_divide.target = "_operator.floordiv";
+    floor_divide.inputs.push_back(make_input("a", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sym_size_int")));
+    floor_divide.inputs.push_back(make_input("b", make_int(2)));
+    floor_divide.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "floordiv"));
+    program.graph.nodes.push_back(floor_divide);
+
+    pnnx::ExportedNode slice;
+    slice.name = "slice";
+    slice.has_name = true;
+    slice.target = "torch.ops.aten.slice.Tensor";
+    slice.inputs.push_back(make_input("self", "x"));
+    slice.inputs.push_back(make_input("dim", make_int(1)));
+    slice.inputs.push_back(make_input("start", pnnx::ExportedArgument()));
+    slice.inputs.push_back(make_input("end", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "floordiv")));
+    slice.outputs.push_back(make_tensor("slice"));
+    program.graph.nodes.push_back(slice);
+
+    program.graph.outputs.push_back(make_tensor("slice"));
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 2});
+    program.graph.tensor_values["x"].sizes[1].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    program.graph.tensor_values["x"].sizes[1].expression = "Symbol('s0', positive=True, integer=True)";
+    program.graph.tensor_values["slice"] = make_tensor_meta(std::vector<int64_t>{1, 1});
+    program.graph.tensor_values["slice"].sizes[1].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    program.graph.tensor_values["slice"].sizes[1].expression = "FloorDiv(Symbol('s0', positive=True, integer=True), Integer(2))";
+
+    pnnx::ExportedSymInt sym_int;
+    sym_int.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    sym_int.expression = "Symbol('s0', positive=True, integer=True)";
+    program.graph.sym_int_values["sym_size_int"] = sym_int;
+    sym_int.expression = "FloorDiv(Symbol('s0', positive=True, integer=True), Integer(2))";
+    program.graph.sym_int_values["floordiv"] = sym_int;
+
+    pnnx::ExportedRangeConstraint constraint;
+    constraint.has_min = true;
+    constraint.min = 2;
+    constraint.has_max = true;
+    constraint.max = 8;
+    program.range_constraints["s0"] = constraint;
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("slice");
+    program.output_specs.push_back(output);
+
+    return program;
+}
+
 static pnnx::ExportedProgram make_higher_order_program(bool autocast_enabled = false)
 {
     pnnx::ExportedProgram program;
@@ -1046,6 +1120,28 @@ static void test_bounded_dynamic_result_shape()
     check(legacy_result == 0, "bounded dynamic result schema 8.14", "lowering failed: " + error);
     check(error.empty(), "bounded dynamic result schema 8.14", "success retained an error");
     check(legacy_result == 0 && count_operator(legacy_graph, "aten::sym_constrain_range_for_size") == 0, "bounded dynamic result schema 8.14", "legacy range constraint node was retained");
+}
+
+static void test_dynamic_input_shape()
+{
+    const pnnx::ExportedProgram program = make_dynamic_input_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "dynamic input shape", "lowering failed: " + error);
+    check(error.empty(), "dynamic input shape", "success retained an error");
+    if (result != 0)
+        return;
+
+    const pnnx::Operand* x = graph.get_operand("x");
+    const pnnx::Operand* slice = graph.get_operand("slice");
+    check(x && x->shape == std::vector<int>({1, -1}), "dynamic input shape", "input metadata is not dynamic");
+    check(slice && slice->shape == std::vector<int>({1, -1}), "dynamic input shape", "derived output metadata is not dynamic");
+    check(count_operator(graph, "aten::size") == 1, "dynamic input shape", "sym_size was not normalized to aten::size");
+    check(count_operator(graph, "aten::floor_divide") == 1, "dynamic input shape", "operator.floordiv was not normalized");
+    check(graph.get_operand("sym_size_int") != 0 && graph.get_operand("floordiv") != 0,
+          "dynamic input shape", "symbolic scalar values were not lowered");
 }
 
 static void test_higher_order_graph_lowering()
@@ -2688,6 +2784,7 @@ int main(int argc, char** argv)
 
     test_linear_relu_graph();
     test_bounded_dynamic_result_shape();
+    test_dynamic_input_shape();
     test_higher_order_graph_lowering();
     test_complex_scalar_lowering();
     test_output_tree_lowering();

@@ -129,6 +129,7 @@ def convert_and_import(
     basename,
     pnnx_args=(),
     trace_kwargs=None,
+    export_kwargs=None,
     output_basename=None,
     return_diagnostic=False,
     defer_success_validation=False,
@@ -141,6 +142,10 @@ def convert_and_import(
         trace_kwargs = {}
     if not isinstance(trace_kwargs, dict):
         raise TypeError("trace_kwargs must be a dict")
+    if export_kwargs is None:
+        export_kwargs = {}
+    if not isinstance(export_kwargs, dict):
+        raise TypeError("export_kwargs must be a dict")
     if output_basename is None:
         output_basename = basename
     if not isinstance(output_basename, str) or not output_basename:
@@ -168,7 +173,7 @@ def convert_and_import(
 
     try:
         if export_format == ExportTestFormat.EXPORTED_PROGRAM:
-            exported_program = torch.export.export(net, inputs)
+            exported_program = torch.export.export(net, inputs, **export_kwargs)
             torch.export.save(exported_program, archive_path)
         else:
             traced_module = torch.jit.trace(net, inputs, **trace_kwargs)

@@ -1,6 +1,8 @@
 # Copyright 2026 Tencent
 # SPDX-License-Identifier: BSD-3-Clause
 
+import os
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -97,6 +99,15 @@ def _test_input2():
     a0 = net(x0, y0)
     a1 = net(x1, y1)
 
+    export_kwargs = {}
+    if os.environ.get("PNNX_TEST_FORMAT") == "pt2":
+        channels = torch.export.Dim("channels", min=2, max=3)
+        width = torch.export.Dim("width", min=6, max=8)
+        export_kwargs["dynamic_shapes"] = (
+            {1: channels, 2: width},
+            {1: channels, 2: width},
+        )
+
     mod = convert_and_import(
         net,
         (x0, y0),
@@ -106,6 +117,7 @@ def _test_input2():
             "input2=test_pnnx_input_npy_input2_x1.npy,test_pnnx_input_npy_input2_y1.npy",
         ),
         trace_kwargs={"_store_inputs": False} if version.parse(torch.__version__) >= version.parse("2.0") else {},
+        export_kwargs=export_kwargs,
         output_basename="test_pnnx_input_npy_input2",
         defer_success_validation=True,
     )

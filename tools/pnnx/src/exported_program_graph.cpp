@@ -187,6 +187,89 @@ static int append_normalized_nodes(const ExportedGraph& source,
                                    ExportedGraphNormalizationContext& context,
                                    std::string& error);
 
+static bool is_sym_size_node(const ExportedNode& node)
+{
+    return node.target == "torch.ops.aten.sym_size.int"
+           && node.inputs.size() == 2
+           && node.inputs[0].arg.type == EXPORTED_ARGUMENT_TENSOR
+           && node.inputs[1].arg.type == EXPORTED_ARGUMENT_INT
+           && node.outputs.size() == 1
+           && node.outputs[0].type == EXPORTED_ARGUMENT_SYMBOLIC_INT;
+}
+
+static bool is_symbolic_range_node(const ExportedNode& node)
+{
+    return node.target == "torch.ops.aten.sym_constrain_range_for_size.default"
+           && node.inputs.size() == 1
+           && node.inputs[0].name == "size"
+           && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
+           && node.outputs.empty();
+}
+
+static bool is_symbolic_comparison_node(const ExportedNode& node)
+{
+    return (node.target == "_operator.ge" || node.target == "_operator.le")
+           && node.inputs.size() == 2
+           && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
+           && node.inputs[1].arg.type == EXPORTED_ARGUMENT_INT
+           && node.outputs.size() == 1
+           && node.outputs[0].type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL;
+}
+
+static bool is_runtime_assert_node(const ExportedNode& node)
+{
+    static const std::string runtime_assert_prefix = "Runtime assertion failed for expression ";
+
+    return node.target == "torch.ops.aten._assert_scalar.default"
+           && node.inputs.size() == 2
+           && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL
+           && node.inputs[1].arg.type == EXPORTED_ARGUMENT_STRING
+           && node.inputs[1].arg.string_value.compare(0, runtime_assert_prefix.size(), runtime_assert_prefix) == 0
+           && node.outputs.empty();
+}
+
+static bool is_symbolic_argument_named(const ExportedArgument& argument, const std::string& name)
+{
+    return (argument.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
+            || argument.type == EXPORTED_ARGUMENT_SYMBOLIC_FLOAT
+            || argument.type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL)
+           && argument.name == name;
+}
+
+static bool has_semantic_symbolic_use(const ExportedGraph& graph, const std::string& name)
+{
+    for (size_t i = 0; i < graph.outputs.size(); i++)
+    {
+        if (is_symbolic_argument_named(graph.outputs[i], name))
+            return true;
+    }
+
+    for (size_t i = 0; i < graph.nodes.size(); i++)
+    {
+        const ExportedNode& node = graph.nodes[i];
+        if (is_symbolic_range_node(node) || is_symbolic_comparison_node(node) || is_runtime_assert_node(node))
+            continue;
+
+        for (size_t j = 0; j < node.inputs.size(); j++)
+        {
+            if (is_symbolic_argument_named(node.inputs[j].arg, name))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+static bool is_symbolic_floor_divide_node(const ExportedNode& node)
+{
+    return node.target == "_operator.floordiv"
+           && node.inputs.size() == 2
+           && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
+           && (node.inputs[1].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT || node.inputs[1].arg.type == EXPORTED_ARGUMENT_INT)
+           && node.outputs.size() == 1
+           && node.outputs[0].type == EXPORTED_ARGUMENT_SYMBOLIC_INT;
+}
+
 static int append_higher_order_graph(const ExportedNode& node,
                                      const std::map<std::string, std::string>& parent_tensor_names,
                                      ExportedGraphNormalizationContext& context,
@@ -284,7 +367,6 @@ static int append_normalized_nodes(const ExportedGraph& source,
                                    std::string& error)
 {
     static const std::string higher_order_prefix = "torch.ops.higher_order.";
-    static const std::string runtime_assert_prefix = "Runtime assertion failed for expression ";
 
     for (size_t i = 0; i < source.nodes.size(); i++)
     {
@@ -296,41 +378,22 @@ static int append_normalized_nodes(const ExportedGraph& source,
             continue;
         }
 
-        if (node.target == "torch.ops.aten.sym_size.int"
-            && node.inputs.size() == 2
-            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_TENSOR
-            && node.inputs[1].arg.type == EXPORTED_ARGUMENT_INT
-            && node.outputs.size() == 1
-            && node.outputs[0].type == EXPORTED_ARGUMENT_SYMBOLIC_INT)
+        if (is_sym_size_node(node) && !has_semantic_symbolic_use(source, node.outputs[0].name))
         {
             continue;
         }
 
-        if (node.target == "torch.ops.aten.sym_constrain_range_for_size.default"
-            && node.inputs.size() == 1
-            && node.inputs[0].name == "size"
-            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
-            && node.outputs.empty())
+        if (is_symbolic_range_node(node))
         {
             continue;
         }
 
-        if ((node.target == "_operator.ge" || node.target == "_operator.le")
-            && node.inputs.size() == 2
-            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
-            && node.inputs[1].arg.type == EXPORTED_ARGUMENT_INT
-            && node.outputs.size() == 1
-            && node.outputs[0].type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL)
+        if (is_symbolic_comparison_node(node))
         {
             continue;
         }
 
-        if (node.target == "torch.ops.aten._assert_scalar.default"
-            && node.inputs.size() == 2
-            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL
-            && node.inputs[1].arg.type == EXPORTED_ARGUMENT_STRING
-            && node.inputs[1].arg.string_value.compare(0, runtime_assert_prefix.size(), runtime_assert_prefix) == 0
-            && node.outputs.empty())
+        if (is_runtime_assert_node(node))
         {
             continue;
         }
@@ -343,6 +406,14 @@ static int append_normalized_nodes(const ExportedGraph& source,
         }
 
         ExportedNode normalized_node = node;
+        if (is_sym_size_node(node))
+            normalized_node.target = "torch.ops.aten.size.int";
+        if (is_symbolic_floor_divide_node(node))
+        {
+            normalized_node.target = "torch.ops.aten.floor_divide.default";
+            normalized_node.inputs[0].name = "self";
+            normalized_node.inputs[1].name = "other";
+        }
         for (size_t j = 0; j < normalized_node.inputs.size(); j++)
         {
             if (map_argument(node.inputs[j].arg, tensor_names, node, normalized_node.inputs[j].arg, error) != 0)
