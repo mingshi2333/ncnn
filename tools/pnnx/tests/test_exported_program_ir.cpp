@@ -7,7 +7,9 @@
 #include "pt2_archive.h"
 
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <map>
 #include <set>
@@ -158,6 +160,13 @@ static pnnx::MaterializedExportedTensor make_state_tensor(const std::vector<int>
     tensor.pnnx_type = 1;
     tensor.shape = shape;
     tensor.data.resize(byte_count, 0);
+    return tensor;
+}
+
+static pnnx::MaterializedExportedTensor make_float_state_tensor(const std::vector<int>& shape, const std::vector<float>& values)
+{
+    pnnx::MaterializedExportedTensor tensor = make_state_tensor(shape, values.size() * sizeof(float));
+    memcpy(tensor.data.data(), values.data(), tensor.data.size());
     return tensor;
 }
 
@@ -633,6 +642,49 @@ static pnnx::ExportedProgram make_unary_program(const std::string& target, const
     return program;
 }
 
+static pnnx::ExportedProgram make_weight_norm_program(bool static_weight)
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("weight_v"));
+    program.graph.inputs.push_back(make_tensor("weight_g"));
+
+    pnnx::ExportedNode weight_norm;
+    weight_norm.name = "_weight_norm";
+    weight_norm.has_name = true;
+    weight_norm.target = "torch.ops.aten._weight_norm.default";
+    weight_norm.inputs.push_back(make_input("v", make_tensor("weight_v")));
+    weight_norm.inputs.push_back(make_input("g", make_tensor("weight_g")));
+    weight_norm.outputs.push_back(make_tensor("normalized_weight"));
+    program.graph.nodes.push_back(weight_norm);
+    program.graph.outputs.push_back(make_tensor("normalized_weight"));
+
+    program.graph.tensor_values["weight_v"] = make_tensor_meta(std::vector<int64_t>{2, 3});
+    program.graph.tensor_values["weight_g"] = make_tensor_meta(std::vector<int64_t>{2, 1});
+    program.graph.tensor_values["normalized_weight"] = make_tensor_meta(std::vector<int64_t>{2, 3});
+
+    const std::vector<std::string> input_names = {"weight_v", "weight_g"};
+    for (size_t i = 0; i < input_names.size(); i++)
+    {
+        pnnx::ExportedInputSpec input;
+        input.kind = static_weight ? pnnx::EXPORTED_PARAMETER : pnnx::EXPORTED_USER_INPUT;
+        input.arg = make_tensor(input_names[i]);
+        if (static_weight)
+            input.target = input_names[i];
+        program.input_specs.push_back(input);
+    }
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("normalized_weight");
+    program.output_specs.push_back(output);
+    return program;
+}
+
 static pnnx::Operator* find_operator(pnnx::Graph& graph, const std::string& type)
 {
     for (size_t i = 0; i < graph.ops.size(); i++)
@@ -1004,6 +1056,71 @@ static void test_instance_norm_running_stats()
     check(canonical && canonical->inputs.size() == 5 && canonical->inputnames == std::vector<std::string>({"input", "running_mean", "running_var", "weight", "bias"}), "instance norm running stats pass level2", "canonical tensor inputs changed");
     check(canonical && canonical->has_param("use_input_stats") && canonical->params.at("use_input_stats").type == 1 && !canonical->params.at("use_input_stats").b, "instance norm running stats pass level2", "canonical use_input_stats is not false");
     check(canonical && canonical->has_param("eps") && canonical->params.at("eps").type == 3 && canonical->params.at("eps").f == 1e-5f, "instance norm running stats pass level2", "canonical eps changed");
+}
+
+static void test_weight_norm_lowering()
+{
+    const pnnx::ExportedProgram program = make_weight_norm_program(true);
+    std::map<std::string, pnnx::MaterializedExportedTensor> state;
+    state["weight_v"] = make_float_state_tensor(std::vector<int>{2, 3}, std::vector<float>{3.f, 4.f, 0.f, 0.f, 5.f, 12.f});
+    state["weight_g"] = make_float_state_tensor(std::vector<int>{2, 1}, std::vector<float>{10.f, 13.f});
+
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, state, graph, error);
+
+    check(result == 0, "weight norm", "lowering failed: " + error);
+    check(error.empty(), "weight norm", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* weight_norm = find_operator(graph, "aten::_weight_norm");
+    check(weight_norm != 0, "weight norm", "missing aten::_weight_norm");
+    check(weight_norm && weight_norm->inputnames == std::vector<std::string>({"v", "g", "dim"}), "weight norm", "weight_norm input names are not canonical");
+    check(weight_norm && weight_norm->inputs.size() == 3, "weight norm", "weight_norm default dim was not materialized");
+    if (!weight_norm || weight_norm->inputs.size() != 3)
+        return;
+
+    const pnnx::Parameter& dim = weight_norm->inputs[2]->producer->params.at("value");
+    check(dim.type == 2 && dim.i == 0, "weight norm", "weight_norm default dim is wrong");
+
+    pnnx::Operand* normalized_weight = graph.get_operand("normalized_weight");
+    check(normalized_weight != 0, "weight norm", "missing normalized weight operand");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::_weight_norm") == 0, "weight norm pass level2", "static weight_norm was not eliminated");
+    check(normalized_weight && normalized_weight->producer && normalized_weight->producer->type == "pnnx.Attribute", "weight norm pass level2", "normalized weight is not a static attribute");
+    check(normalized_weight && normalized_weight->type == 1 && normalized_weight->shape == std::vector<int>({2, 3}), "weight norm pass level2", "normalized weight metadata changed");
+    if (normalized_weight && normalized_weight->producer && normalized_weight->producer->type == "pnnx.Attribute" && normalized_weight->producer->has_attr("data"))
+    {
+        const pnnx::Attribute& data = normalized_weight->producer->attrs.at("data");
+        const std::vector<float> actual = data.get_float32_data();
+        const std::vector<float> expected = {6.f, 8.f, 0.f, 0.f, 5.f, 12.f};
+        check(data.type == 1 && data.shape == std::vector<int>({2, 3}), "weight norm pass level2", "folded attribute metadata is wrong");
+        check(actual.size() == expected.size(), "weight norm pass level2", "folded attribute element count is wrong");
+        if (actual.size() == expected.size())
+        {
+            bool values_match = true;
+            for (size_t i = 0; i < actual.size(); i++)
+                values_match = values_match && fabsf(actual[i] - expected[i]) < 1e-6f;
+            check(values_match, "weight norm pass level2", "folded attribute values are wrong");
+        }
+    }
+
+    const pnnx::ExportedProgram dynamic_program = make_weight_norm_program(false);
+    pnnx::Graph dynamic_graph;
+    error = "stale";
+    const int dynamic_result = pnnx::lower_exported_program(dynamic_program, std::map<std::string, pnnx::MaterializedExportedTensor>(), dynamic_graph, error);
+    check(dynamic_result == 0, "dynamic weight norm", "lowering failed: " + error);
+    check(error.empty(), "dynamic weight norm", "success retained an error");
+    if (dynamic_result != 0)
+        return;
+
+    pnnx::pass_level2(dynamic_graph);
+    pnnx::Operator* dynamic_weight_norm = find_operator(dynamic_graph, "torch._weight_norm");
+    check(count_operator(dynamic_graph, "aten::_weight_norm") == 0 && dynamic_weight_norm != 0, "dynamic weight norm pass level2", "dynamic weight_norm was not canonicalized");
+    check(dynamic_weight_norm && dynamic_weight_norm->inputs.size() == 2 && dynamic_weight_norm->inputnames == std::vector<std::string>({"v", "g"}), "dynamic weight norm pass level2", "dynamic weight_norm tensor inputs changed");
+    check(dynamic_weight_norm && dynamic_weight_norm->has_param("dim") && dynamic_weight_norm->params.at("dim").type == 2 && dynamic_weight_norm->params.at("dim").i == 0, "dynamic weight norm pass level2", "dynamic weight_norm dim changed");
 }
 
 static void test_inplace_relu_is_functionalized_by_level2()
@@ -2011,6 +2128,7 @@ int main(int argc, char** argv)
     test_conv_transpose_nd_direct_lowering();
     test_batch_norm_constant_arguments();
     test_instance_norm_running_stats();
+    test_weight_norm_lowering();
     test_inplace_relu_is_functionalized_by_level2();
     test_max_pool2d_constant_arguments();
     test_inplace_add_is_functionalized_by_level2();
