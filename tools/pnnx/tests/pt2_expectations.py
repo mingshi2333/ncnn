@@ -357,7 +357,7 @@ PT2_EXPECTATIONS = {
     "test_pnnx_fuse_select_to_unbind": (PASS, ""),
     "test_pnnx_fuse_slice_to_tensor_split": (PASS, ""),
     "test_pnnx_input_npy": (NUMERICAL_MISMATCH, "output mismatch"),
-    "test_pnnx_model_stat": (NUMERICAL_MISMATCH, "output mismatch"),
+    "test_pnnx_model_stat": (PASS, ""),
     "test_quantization_shufflenet_v2_x1_0": (EXPORT_UNSUPPORTED, "Conv2dPackedParamsBase"),
     "test_resnet18": (PASS, ""),
     "test_shufflenet_v2_x1_0": (PASS, ""),
