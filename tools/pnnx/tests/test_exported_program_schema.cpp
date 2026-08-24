@@ -64,6 +64,18 @@ static std::string tensor_argument_json(const std::string& name)
     return "{\"as_tensor\":{\"name\":\"" + name + "\"}}";
 }
 
+static std::string graph_argument_json(const std::string& name)
+{
+    return "{\"as_graph\":{\"name\":\"" + name
+           + "\",\"graph\":{\"inputs\":[" + tensor_argument_json("sub_x")
+           + "],\"outputs\":[" + tensor_argument_json("sub_y")
+           + "],\"nodes\":[{\"target\":\"torch.ops.aten.relu.default\",\"inputs\":[{\"name\":\"self\",\"arg\":" + tensor_argument_json("sub_x")
+           + ",\"kind\":1}],\"outputs\":[" + tensor_argument_json("sub_y")
+           + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"sub_y\"}],\"tensor_values\":{\"sub_x\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]")
+           + ",\"sub_y\":" + tensor_meta_json("[{\"as_int\":2}]", "[{\"as_int\":1}]")
+           + "},\"sym_int_values\":{},\"sym_bool_values\":{},\"is_single_tensor_return\":false,\"custom_obj_values\":{},\"sym_float_values\":{}}}}";
+}
+
 static std::string json_string(const std::string& value)
 {
     std::string result = "\"";
@@ -657,8 +669,13 @@ static void test_graph_arguments()
     if (parse_argument_case("{\"as_operator\":\"torch.ops.aten.relu.default\"}", ",\"kind\":1", argument, kind, "argument operator"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_operator" && argument.string_value == "torch.ops.aten.relu.default", "argument operator", "operator classification changed");
 
-    if (parse_argument_case("{\"as_graph\":{}}", ",\"kind\":1", argument, kind, "argument graph"))
-        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_graph", "argument graph", "graph classification changed");
+    if (parse_argument_case(graph_argument_json("submod_1"), ",\"kind\":1", argument, kind, "argument graph"))
+    {
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_GRAPH, "argument graph", "graph classification changed");
+        check(argument.graph_name == "submod_1", "argument graph", "graph name changed");
+        check(argument.graph_value && argument.graph_value->inputs.size() == 1 && argument.graph_value->nodes.size() == 1 && argument.graph_value->outputs.size() == 1, "argument graph", "nested graph shape changed");
+        check(argument.graph_value && argument.graph_value->nodes[0].target == "torch.ops.aten.relu.default", "argument graph", "nested graph target changed");
+    }
 
     if (parse_argument_case("{\"as_optional_tensor\":{\"as_none\":true}}", ",\"kind\":1", argument, kind, "argument optional tensor"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_optional_tensor", "argument optional tensor", "optional tensor classification changed");
@@ -700,6 +717,31 @@ static void test_graph_arguments()
     fixture = ProgramFixture();
     fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_int\":1},\"kind\":3}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
     expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].kind", "unknown argument kind", "argument invalid kind");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.higher_order.wrap_with_set_grad_enabled\",\"inputs\":[{\"name\":\"\",\"arg\":{\"as_bool\":false},\"kind\":1},{\"name\":\"\",\"arg\":" + graph_argument_json("submod_1") + ",\"kind\":1},{\"name\":\"\",\"arg\":" + tensor_argument_json("x") + ",\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"wrapped\"}]";
+    pnnx::ExportedProgram positional_program;
+    if (parse_program_fixture(fixture, positional_program, "empty positional argument name"))
+    {
+        check(positional_program.graph.nodes[0].inputs.size() == 3, "empty positional argument name", "input count changed");
+        check(positional_program.graph.nodes[0].inputs[0].name.empty() && positional_program.graph.nodes[0].inputs[1].name.empty(), "empty positional argument name", "empty names changed");
+    }
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"\",\"arg\":{\"as_int\":1},\"kind\":2}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].name", "name must not be empty", "empty keyword argument name");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.higher_order.wrap_with_set_grad_enabled\",\"inputs\":[{\"name\":\"\",\"arg\":{\"as_graph\":{\"graph\":{}}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"wrapped\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_graph.name", "missing required field", "graph argument missing name");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.higher_order.wrap_with_set_grad_enabled\",\"inputs\":[{\"name\":\"\",\"arg\":{\"as_graph\":{\"name\":\"\",\"graph\":{}}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"wrapped\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_graph.name", "graph name must not be empty", "graph argument empty name");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.higher_order.wrap_with_set_grad_enabled\",\"inputs\":[{\"name\":\"\",\"arg\":{\"as_graph\":{\"name\":\"submod\"}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"wrapped\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_graph.graph", "missing required field", "graph argument missing graph");
 }
 
 static void test_graph_signatures()

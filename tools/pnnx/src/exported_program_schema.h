@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,8 @@ struct ExportedPayloadConfig
     std::map<std::string, ExportedPayloadEntry> entries;
 };
 
+struct ExportedGraph;
+
 enum ExportedArgumentType
 {
     EXPORTED_ARGUMENT_NONE,
@@ -72,6 +75,7 @@ enum ExportedArgumentType
     EXPORTED_ARGUMENT_MEMORY_FORMAT,
     EXPORTED_ARGUMENT_LAYOUT,
     EXPORTED_ARGUMENT_DEVICE,
+    EXPORTED_ARGUMENT_GRAPH,
     EXPORTED_ARGUMENT_UNSUPPORTED
 };
 
@@ -101,6 +105,8 @@ struct ExportedArgument
     std::vector<std::string> string_values;
     int64_t enum_value;
     ExportedDevice device_value;
+    std::string graph_name;
+    std::shared_ptr<ExportedGraph> graph_value;
     std::string unsupported_tag;
 };
 

@@ -831,6 +831,8 @@ static int read_static_sym_argument(const JsonValue& value, const std::string& s
     return 0;
 }
 
+static int parse_exported_graph(const JsonValue& value, ExportedGraph& graph, const std::string& path, ExportedSchemaError& error);
+
 static int parse_exported_argument_value(const JsonValue& value, ExportedArgument& argument, const std::string& path, ExportedSchemaError& error)
 {
     argument = ExportedArgument();
@@ -914,6 +916,30 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
     {
         argument.type = EXPORTED_ARGUMENT_DEVICE;
         return read_device(payload, argument.device_value, tag_path, error);
+    }
+    if (tag == "as_graph")
+    {
+        if (payload.type() != JSON_OBJECT)
+            return schema_error(error, tag_path, "expected object");
+
+        const JsonValue* name = required_field(payload, "name", tag_path, error);
+        if (!name)
+            return -1;
+        if (read_string(*name, argument.graph_name, tag_path + ".name", error) != 0)
+            return -1;
+        if (argument.graph_name.empty())
+            return schema_error(error, tag_path + ".name", "graph name must not be empty");
+
+        const JsonValue* graph = required_field(payload, "graph", tag_path, error);
+        if (!graph)
+            return -1;
+
+        argument.graph_value.reset(new ExportedGraph);
+        if (parse_exported_graph(*graph, *argument.graph_value, tag_path + ".graph", error) != 0)
+            return -1;
+
+        argument.type = EXPORTED_ARGUMENT_GRAPH;
+        return 0;
     }
     if (tag == "as_sym_int" || tag == "as_sym_float" || tag == "as_sym_bool")
     {
@@ -1006,7 +1032,7 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
 
     JsonType expected_type = JSON_NULL;
     bool known_unsupported = true;
-    if (tag == "as_graph" || tag == "as_optional_tensor" || tag == "as_complex" || tag == "as_string_to_argument")
+    if (tag == "as_optional_tensor" || tag == "as_complex" || tag == "as_string_to_argument")
         expected_type = JSON_OBJECT;
     else if (tag == "as_optional_tensors" || tag == "as_nested_tensors" || tag == "as_int_lists" || tag == "as_float_lists")
         expected_type = JSON_ARRAY;
@@ -1073,8 +1099,6 @@ static int parse_named_argument(const JsonValue& value, ExportedNamedArgument& n
         return -1;
     if (read_string(*name, named_argument.name, path + ".name", error) != 0)
         return -1;
-    if (named_argument.name.empty())
-        return schema_error(error, path + ".name", "named argument name must not be empty");
 
     const JsonValue* argument = required_field(value, "arg", path, error);
     if (!argument)
@@ -1086,16 +1110,21 @@ static int parse_named_argument(const JsonValue& value, ExportedNamedArgument& n
     if (!kind || kind->type() == JSON_NULL)
     {
         named_argument.kind = EXPORTED_ARGUMENT_KIND_MISSING;
-        return 0;
+    }
+    else
+    {
+        int64_t kind_value = 0;
+        if (read_integer(*kind, kind_value, path + ".kind", error) != 0)
+            return -1;
+        if (kind_value < EXPORTED_ARGUMENT_KIND_UNKNOWN || kind_value > EXPORTED_ARGUMENT_KIND_KEYWORD)
+            return schema_error(error, path + ".kind", "unknown argument kind");
+
+        named_argument.kind = (ExportedArgumentKind)kind_value;
     }
 
-    int64_t kind_value = 0;
-    if (read_integer(*kind, kind_value, path + ".kind", error) != 0)
-        return -1;
-    if (kind_value < EXPORTED_ARGUMENT_KIND_UNKNOWN || kind_value > EXPORTED_ARGUMENT_KIND_KEYWORD)
-        return schema_error(error, path + ".kind", "unknown argument kind");
+    if (named_argument.name.empty() && named_argument.kind != EXPORTED_ARGUMENT_KIND_POSITIONAL)
+        return schema_error(error, path + ".name", "named argument name must not be empty");
 
-    named_argument.kind = (ExportedArgumentKind)kind_value;
     return 0;
 }
 
