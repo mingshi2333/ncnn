@@ -1302,6 +1302,76 @@ static void test_float_list_argument_lowering()
     }
 }
 
+static void test_avg_pool_empty_stride_normalization()
+{
+    struct AvgPoolCase
+    {
+        const char* target;
+        const char* aten_type;
+        const char* functional_type;
+        const char* output_name;
+        std::vector<int64_t> kernel_size;
+        std::vector<int64_t> stride;
+        std::vector<int64_t> padding;
+        bool has_divisor_override;
+    };
+
+    const AvgPoolCase cases[] = {
+        {"torch.ops.aten.avg_pool1d.default", "aten::avg_pool1d", "F.avg_pool1d", "avg_pool1d", std::vector<int64_t>{2}, std::vector<int64_t>{1}, std::vector<int64_t>{0}, false},
+        {"torch.ops.aten.avg_pool2d.default", "aten::avg_pool2d", "F.avg_pool2d", "avg_pool2d", std::vector<int64_t>{2, 2}, std::vector<int64_t>{1, 2}, std::vector<int64_t>{0, 0}, true},
+        {"torch.ops.aten.avg_pool3d.default", "aten::avg_pool3d", "F.avg_pool3d", "avg_pool3d", std::vector<int64_t>{2, 2, 2}, std::vector<int64_t>{1, 2, 1}, std::vector<int64_t>{0, 0, 0}, true},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        const AvgPoolCase& c = cases[i];
+        std::vector<pnnx::ExportedNamedArgument> arguments;
+        arguments.push_back(make_input("kernel_size", make_ints(c.kernel_size)));
+        arguments.push_back(make_input("stride", make_ints(std::vector<int64_t>())));
+        arguments.push_back(make_input("padding", make_ints(c.padding)));
+        arguments.push_back(make_input("ceil_mode", make_bool(false)));
+        arguments.push_back(make_input("count_include_pad", make_bool(true)));
+        if (c.has_divisor_override)
+            arguments.push_back(make_input("divisor_override", pnnx::ExportedArgument()));
+
+        pnnx::ExportedProgram program = make_unary_program(c.target, c.output_name, arguments);
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "avg pool empty stride", error);
+        if (result == 0)
+        {
+            pnnx::Operator* avg_pool = find_operator(graph, c.aten_type);
+            check(avg_pool && avg_pool->inputs.size() >= 3 && avg_pool->inputs[2]->producer && avg_pool->inputs[2]->producer->has_param("value"), "avg pool empty stride", "raw stride constant is missing");
+            if (avg_pool && avg_pool->inputs.size() >= 3 && avg_pool->inputs[2]->producer && avg_pool->inputs[2]->producer->has_param("value"))
+            {
+                const pnnx::Parameter& stride = avg_pool->inputs[2]->producer->params.at("value");
+                check(stride.type == 5 && stride.ai.empty(), "avg pool empty stride", "front end changed the serialized empty list");
+            }
+
+            pnnx::pass_level2(graph);
+            pnnx::Operator* functional_avg_pool = find_operator(graph, c.functional_type);
+            check(functional_avg_pool != 0, "avg pool empty stride pass level2", "avg pool was not canonicalized");
+            check(functional_avg_pool && functional_avg_pool->has_param("stride") && functional_avg_pool->params.at("stride").type == 0, "avg pool empty stride pass level2", "empty stride was not normalized to None");
+        }
+
+        arguments[1] = make_input("stride", make_ints(c.stride));
+        program = make_unary_program(c.target, c.output_name, arguments);
+        pnnx::Graph nonempty_graph;
+        error.clear();
+        const int nonempty_result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), nonempty_graph, error);
+
+        check(nonempty_result == 0, "avg pool nonempty stride", error);
+        if (nonempty_result == 0)
+        {
+            pnnx::pass_level2(nonempty_graph);
+            pnnx::Operator* functional_avg_pool = find_operator(nonempty_graph, c.functional_type);
+            check(functional_avg_pool && functional_avg_pool->has_param("stride") && functional_avg_pool->params.at("stride").type == 5 && functional_avg_pool->params.at("stride").ai == std::vector<int>(c.stride.begin(), c.stride.end()), "avg pool nonempty stride pass level2", "explicit stride changed");
+        }
+    }
+}
+
 static void test_alias_elimination()
 {
     {
@@ -1711,6 +1781,7 @@ int main(int argc, char** argv)
     test_device_argument_lowering();
     test_layout_argument_lowering();
     test_float_list_argument_lowering();
+    test_avg_pool_empty_stride_normalization();
     test_alias_elimination();
     test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();
