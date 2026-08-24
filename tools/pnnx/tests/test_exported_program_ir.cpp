@@ -1,6 +1,7 @@
 // Copyright 2026 Tencent
 // SPDX-License-Identifier: BSD-3-Clause
 
+#include "exported_program_graph.h"
 #include "load_exported_program.h"
 #include "pass_level2.h"
 #include "pass_level3/fuse_op1ton_unpack.h"
@@ -115,6 +116,30 @@ static pnnx::ExportedArgument make_ints(const std::vector<int64_t>& values)
     pnnx::ExportedArgument argument;
     argument.type = pnnx::EXPORTED_ARGUMENT_INT_LIST;
     argument.int_values = values;
+    return argument;
+}
+
+static pnnx::ExportedSymIntListElement make_static_sym_int_list_element(int64_t value)
+{
+    pnnx::ExportedSymIntListElement element;
+    element.type = pnnx::EXPORTED_SYM_INT_LIST_STATIC;
+    element.value = value;
+    return element;
+}
+
+static pnnx::ExportedSymIntListElement make_symbolic_sym_int_list_element(const std::string& name)
+{
+    pnnx::ExportedSymIntListElement element;
+    element.type = pnnx::EXPORTED_SYM_INT_LIST_SYMBOLIC;
+    element.name = name;
+    return element;
+}
+
+static pnnx::ExportedArgument make_symbolic_ints(const std::vector<pnnx::ExportedSymIntListElement>& values)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT_LIST;
+    argument.symbolic_int_values = values;
     return argument;
 }
 
@@ -1149,6 +1174,27 @@ static int count_operator(const pnnx::Graph& graph, const std::string& type)
     return count;
 }
 
+static size_t count_exported_target(const pnnx::ExportedGraph& graph, const std::string& target)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < graph.nodes.size(); i++)
+    {
+        if (graph.nodes[i].target == target)
+            count++;
+    }
+    return count;
+}
+
+static const pnnx::ExportedNode* find_exported_target(const pnnx::ExportedGraph& graph, const std::string& target)
+{
+    for (size_t i = 0; i < graph.nodes.size(); i++)
+    {
+        if (graph.nodes[i].target == target)
+            return &graph.nodes[i];
+    }
+    return 0;
+}
+
 static void expect_lower_error(const pnnx::ExportedProgram& program,
                                const std::map<std::string, pnnx::MaterializedExportedTensor>& state,
                                const std::string& expected_error,
@@ -1324,6 +1370,260 @@ static void test_dynamic_input_shape()
     check(count_operator(graph, "aten::floor_divide") == 1, "dynamic input shape", "operator.floordiv was not normalized");
     check(graph.get_operand("sym_size_int") != 0 && graph.get_operand("floordiv") != 0,
           "dynamic input shape", "symbolic scalar values were not lowered");
+}
+
+static pnnx::ExportedGraph make_symbolic_integer_comparison_graph(bool graph_output, bool semantic_consumer, bool runtime_assert)
+{
+    pnnx::ExportedGraph graph;
+    graph.inputs.push_back(make_tensor("x"));
+    graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+
+    pnnx::ExportedNode sym_size;
+    sym_size.name = "size";
+    sym_size.has_name = true;
+    sym_size.target = "torch.ops.aten.sym_size.int";
+    sym_size.inputs.push_back(make_input("self", "x"));
+    sym_size.inputs.push_back(make_input("dim", make_int(0)));
+    sym_size.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "size"));
+    graph.nodes.push_back(sym_size);
+
+    pnnx::ExportedNode ge;
+    ge.name = "guard";
+    ge.has_name = true;
+    ge.target = "_operator.ge";
+    ge.inputs.push_back(make_input("a", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "size")));
+    ge.inputs.push_back(make_input("b", make_int(0)));
+    ge.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "guard"));
+    graph.nodes.push_back(ge);
+
+    if (runtime_assert)
+    {
+        pnnx::ExportedNode assertion;
+        assertion.name = "assert_guard";
+        assertion.has_name = true;
+        assertion.target = "torch.ops.aten._assert_scalar.default";
+        assertion.inputs.push_back(make_input("self", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "guard")));
+        assertion.inputs.push_back(make_input("assert_msg", make_string("Runtime assertion failed for expression size >= 0")));
+        graph.nodes.push_back(assertion);
+    }
+
+    if (semantic_consumer)
+    {
+        pnnx::ExportedNode scalar_tensor;
+        scalar_tensor.name = "guard_tensor";
+        scalar_tensor.has_name = true;
+        scalar_tensor.target = "torch.ops.aten.scalar_tensor.default";
+        scalar_tensor.inputs.push_back(make_input("s", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "guard")));
+        scalar_tensor.outputs.push_back(make_tensor("guard_tensor"));
+        graph.nodes.push_back(scalar_tensor);
+        graph.tensor_values["guard_tensor"] = make_tensor_meta(std::vector<int64_t>());
+    }
+
+    pnnx::ExportedSymInt sym_int;
+    sym_int.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    sym_int.expression = "Symbol('s0', positive=True, integer=True)";
+    graph.sym_int_values["size"] = sym_int;
+
+    pnnx::ExportedSymBool sym_bool;
+    sym_bool.is_expression = true;
+    sym_bool.expression = "GreaterThan(Symbol('s0', positive=True, integer=True), Integer(0))";
+    graph.sym_bool_values["guard"] = sym_bool;
+
+    if (graph_output)
+        graph.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "guard"));
+    else if (semantic_consumer)
+        graph.outputs.push_back(make_tensor("guard_tensor"));
+    else
+        graph.outputs.push_back(make_tensor("x"));
+
+    return graph;
+}
+
+static void test_symbolic_scalar_graph_normalization()
+{
+    {
+        pnnx::ExportedGraph graph;
+        graph.inputs.push_back(make_tensor("x"));
+        graph.inputs.push_back(make_tensor("y"));
+        graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>());
+        graph.tensor_values["y"] = make_tensor_meta(std::vector<int64_t>());
+
+        pnnx::ExportedNode item;
+        item.name = "item";
+        item.has_name = true;
+        item.target = "torch.ops.aten.item.default";
+        item.inputs.push_back(make_input("self", "x"));
+        item.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item"));
+        graph.nodes.push_back(item);
+
+        item.name = "item_1";
+        item.inputs[0] = make_input("self", "y");
+        item.outputs[0] = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item_1");
+        graph.nodes.push_back(item);
+
+        pnnx::ExportedNode le;
+        le.name = "guard";
+        le.has_name = true;
+        le.target = "_operator.le";
+        le.inputs.push_back(make_input("a", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item")));
+        le.inputs.push_back(make_input("b", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item_1")));
+        le.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "guard"));
+        graph.nodes.push_back(le);
+
+        pnnx::ExportedNode assertion;
+        assertion.name = "assert_guard";
+        assertion.has_name = true;
+        assertion.target = "torch.ops.aten._assert_scalar.default";
+        assertion.inputs.push_back(make_input("self", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "guard")));
+        assertion.inputs.push_back(make_input("assert_msg", make_string("Runtime assertion failed for expression zuf0 <= zuf1")));
+        graph.nodes.push_back(assertion);
+
+        pnnx::ExportedNode arange;
+        arange.name = "arange";
+        arange.has_name = true;
+        arange.target = "torch.ops.aten.arange.start";
+        arange.inputs.push_back(make_input("start", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item")));
+        arange.inputs.push_back(make_input("end", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item_1")));
+        arange.outputs.push_back(make_tensor("arange"));
+        graph.nodes.push_back(arange);
+        graph.outputs.push_back(make_tensor("arange"));
+        graph.tensor_values["arange"] = make_tensor_meta(std::vector<int64_t>{4});
+
+        pnnx::ExportedSymFloat sym_float;
+        sym_float.is_expression = true;
+        sym_float.expression = "Symbol('zuf0')";
+        graph.sym_float_values["item"] = sym_float;
+        sym_float.expression = "Symbol('zuf1')";
+        graph.sym_float_values["item_1"] = sym_float;
+
+        pnnx::ExportedSymBool sym_bool;
+        sym_bool.is_expression = true;
+        sym_bool.expression = "LessThan(Symbol('zuf0'), Symbol('zuf1'))";
+        graph.sym_bool_values["guard"] = sym_bool;
+
+        pnnx::ExportedGraph normalized;
+        std::string error = "stale";
+        const int result = pnnx::normalize_exported_program_graph(graph, normalized, error);
+        check(result == 0, "symbolic float guard", "normalization failed: " + error);
+        check(error.empty(), "symbolic float guard", "success retained an error");
+        check(count_exported_target(normalized, "_operator.le") == 0, "symbolic float guard", "assertion-only comparison was retained");
+        check(count_exported_target(normalized, "torch.ops.aten._assert_scalar.default") == 0, "symbolic float guard", "runtime assertion was retained");
+        check(count_exported_target(normalized, "torch.ops.aten.item.default") == 2, "symbolic float guard", "item producers were removed");
+        check(count_exported_target(normalized, "torch.ops.aten.arange.start") == 1, "symbolic float guard", "semantic arange consumer was removed");
+    }
+
+    {
+        const pnnx::ExportedGraph cases[] = {
+            make_symbolic_integer_comparison_graph(true, false, false),
+            make_symbolic_integer_comparison_graph(false, true, false),
+            make_symbolic_integer_comparison_graph(false, true, true)};
+        const char* names[] = {"symbolic comparison output", "symbolic comparison consumer", "symbolic comparison multiple consumers"};
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        {
+            pnnx::ExportedGraph normalized;
+            std::string error = "stale";
+            const int result = pnnx::normalize_exported_program_graph(cases[i], normalized, error);
+            check(result == 0, names[i], "normalization failed: " + error);
+            check(error.empty(), names[i], "success retained an error");
+            check(count_exported_target(normalized, "_operator.ge") == 1, names[i], "semantic comparison was removed");
+            check(count_exported_target(normalized, "torch.ops.aten.size.int") == 1, names[i], "comparison input producer was removed");
+            if (i == 2)
+                check(count_exported_target(normalized, "torch.ops.aten._assert_scalar.default") == 1, names[i], "shared runtime assertion was removed");
+        }
+
+        pnnx::ExportedGraph user_assertion = make_symbolic_integer_comparison_graph(false, false, true);
+        user_assertion.nodes[2].inputs[1].arg.string_value = "user assertion";
+        pnnx::ExportedGraph normalized;
+        std::string error = "stale";
+        const int result = pnnx::normalize_exported_program_graph(user_assertion, normalized, error);
+        check(result == 0, "symbolic user assertion", "normalization failed: " + error);
+        check(error.empty(), "symbolic user assertion", "success retained an error");
+        check(count_exported_target(normalized, "_operator.ge") == 1, "symbolic user assertion", "user comparison was removed");
+        check(count_exported_target(normalized, "torch.ops.aten._assert_scalar.default") == 1, "symbolic user assertion", "user assertion was removed");
+        check(count_exported_target(normalized, "torch.ops.aten.size.int") == 1, "symbolic user assertion", "user assertion input producer was removed");
+    }
+
+    {
+        pnnx::ExportedGraph graph;
+        graph.inputs.push_back(make_tensor("x"));
+        graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 4});
+
+        pnnx::ExportedNode sym_size;
+        sym_size.name = "size";
+        sym_size.has_name = true;
+        sym_size.target = "torch.ops.aten.sym_size.int";
+        sym_size.inputs.push_back(make_input("self", "x"));
+        sym_size.inputs.push_back(make_input("dim", make_int(1)));
+        sym_size.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "size"));
+        graph.nodes.push_back(sym_size);
+
+        pnnx::ExportedNode reshape;
+        reshape.name = "reshape";
+        reshape.has_name = true;
+        reshape.target = "torch.ops.aten.reshape.default";
+        reshape.inputs.push_back(make_input("self", "x"));
+        reshape.inputs.push_back(make_input("shape", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement>{
+                                                         make_symbolic_sym_int_list_element("size"),
+                                                         make_static_sym_int_list_element(192)})));
+        reshape.outputs.push_back(make_tensor("reshape"));
+        graph.nodes.push_back(reshape);
+        graph.outputs.push_back(make_tensor("reshape"));
+        graph.tensor_values["reshape"] = make_tensor_meta(std::vector<int64_t>{4, 192});
+
+        pnnx::ExportedSymInt sym_int;
+        sym_int.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+        sym_int.expression = "Symbol('s0', positive=True, integer=True)";
+        graph.sym_int_values["size"] = sym_int;
+
+        pnnx::ExportedGraph normalized;
+        std::string error = "stale";
+        const int result = pnnx::normalize_exported_program_graph(graph, normalized, error);
+        check(result == 0, "symbolic integer list use", "normalization failed: " + error);
+        check(error.empty(), "symbolic integer list use", "success retained an error");
+        check(count_exported_target(normalized, "torch.ops.aten.size.int") == 1, "symbolic integer list use", "list-only symbol producer was removed");
+    }
+
+    {
+        pnnx::ExportedGraph graph;
+        graph.inputs.push_back(make_tensor("x"));
+        graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{4, 8});
+
+        pnnx::ExportedNode sym_size;
+        sym_size.name = "size";
+        sym_size.has_name = true;
+        sym_size.target = "torch.ops.aten.sym_size.int";
+        sym_size.inputs.push_back(make_input("self", "x"));
+        sym_size.inputs.push_back(make_input("dim", make_int(0)));
+        sym_size.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "size"));
+        graph.nodes.push_back(sym_size);
+
+        pnnx::ExportedNode sub;
+        sub.name = "sub";
+        sub.has_name = true;
+        sub.target = "_operator.sub";
+        sub.inputs.push_back(make_input("a", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "size")));
+        sub.inputs.push_back(make_input("b", make_int(1)));
+        sub.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sub"));
+        graph.nodes.push_back(sub);
+        graph.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sub"));
+
+        pnnx::ExportedSymInt sym_int;
+        sym_int.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+        sym_int.expression = "Symbol('s0', positive=True, integer=True)";
+        graph.sym_int_values["size"] = sym_int;
+        sym_int.expression = "Add(Symbol('s0', positive=True, integer=True), Integer(-1))";
+        graph.sym_int_values["sub"] = sym_int;
+
+        pnnx::ExportedGraph normalized;
+        std::string error = "stale";
+        const int result = pnnx::normalize_exported_program_graph(graph, normalized, error);
+        check(result == 0, "symbolic integer subtraction", "normalization failed: " + error);
+        check(error.empty(), "symbolic integer subtraction", "success retained an error");
+        const pnnx::ExportedNode* normalized_sub = find_exported_target(normalized, "torch.ops.aten.sub.int");
+        check(normalized_sub != 0, "symbolic integer subtraction", "operator.sub was not normalized");
+        check(normalized_sub && normalized_sub->inputs.size() == 2 && normalized_sub->inputs[0].name == "a" && normalized_sub->inputs[1].name == "b",
+              "symbolic integer subtraction", "normalized input names changed");
+    }
 }
 
 static void test_higher_order_graph_lowering()
@@ -2968,6 +3268,7 @@ int main(int argc, char** argv)
     test_torchvision_custom_operator_lowering();
     test_bounded_dynamic_result_shape();
     test_dynamic_input_shape();
+    test_symbolic_scalar_graph_normalization();
     test_higher_order_graph_lowering();
     test_complex_scalar_lowering();
     test_output_tree_lowering();
