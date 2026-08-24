@@ -133,40 +133,40 @@ static void test_contiguous_and_strided_views()
     const std::vector<char> storage = make_float_storage(12, pnnx::PT2_BYTE_ORDER_LITTLE);
     pnnx::MaterializedExportedTensor tensor;
 
-    pnnx::ExportedTensorMeta meta = make_meta(7, std::vector<int64_t>{2, 3}, std::vector<int64_t>{3, 1}, 0);
+    pnnx::ExportedTensorMeta meta = make_meta(7, std::vector<int64_t> {2, 3}, std::vector<int64_t> {3, 1}, 0);
     if (expect_success(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "contiguous f32"))
     {
         check(tensor.pnnx_type == 1, "contiguous f32", "wrong pnnx type");
-        check(same_shape(tensor.shape, std::vector<int>{2, 3}), "contiguous f32", "wrong shape");
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{0.f, 1.f, 2.f, 3.f, 4.f, 5.f}), "contiguous f32", "wrong values");
+        check(same_shape(tensor.shape, std::vector<int> {2, 3}), "contiguous f32", "wrong shape");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {0.f, 1.f, 2.f, 3.f, 4.f, 5.f}), "contiguous f32", "wrong values");
     }
 
-    meta = make_meta(7, std::vector<int64_t>{2, 3}, std::vector<int64_t>{1, 2}, 0);
+    meta = make_meta(7, std::vector<int64_t> {2, 3}, std::vector<int64_t> {1, 2}, 0);
     if (expect_success(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "transposed f32"))
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{0.f, 2.f, 4.f, 1.f, 3.f, 5.f}), "transposed f32", "wrong values");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {0.f, 2.f, 4.f, 1.f, 3.f, 5.f}), "transposed f32", "wrong values");
 
-    meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 3);
+    meta = make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t> {1}, 3);
     if (expect_success(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "offset f32"))
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{3.f, 4.f}), "offset f32", "wrong values");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {3.f, 4.f}), "offset f32", "wrong values");
 
-    const pnnx::ExportedTensorMeta left = make_meta(7, std::vector<int64_t>{3}, std::vector<int64_t>{1}, 0);
-    const pnnx::ExportedTensorMeta right = make_meta(7, std::vector<int64_t>{3}, std::vector<int64_t>{1}, 2);
+    const pnnx::ExportedTensorMeta left = make_meta(7, std::vector<int64_t> {3}, std::vector<int64_t> {1}, 0);
+    const pnnx::ExportedTensorMeta right = make_meta(7, std::vector<int64_t> {3}, std::vector<int64_t> {1}, 2);
     if (expect_success(left, storage, pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "shared storage left"))
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{0.f, 1.f, 2.f}), "shared storage left", "wrong values");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {0.f, 1.f, 2.f}), "shared storage left", "wrong values");
     if (expect_success(right, storage, pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "shared storage right"))
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{2.f, 3.f, 4.f}), "shared storage right", "wrong values");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {2.f, 3.f, 4.f}), "shared storage right", "wrong values");
 
     meta = make_meta(7, std::vector<int64_t>(), std::vector<int64_t>(), 4);
     if (expect_success(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "scalar f32"))
     {
         check(tensor.shape.empty(), "scalar f32", "scalar shape changed");
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{4.f}), "scalar f32", "wrong value");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {4.f}), "scalar f32", "wrong value");
     }
 
-    meta = make_meta(7, std::vector<int64_t>{0, 3}, std::vector<int64_t>{3, 1}, 0);
+    meta = make_meta(7, std::vector<int64_t> {0, 3}, std::vector<int64_t> {3, 1}, 0);
     if (expect_success(meta, std::vector<char>(), pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "zero element tensor"))
     {
-        check(same_shape(tensor.shape, std::vector<int>{0, 3}), "zero element tensor", "wrong shape");
+        check(same_shape(tensor.shape, std::vector<int> {0, 3}), "zero element tensor", "wrong shape");
         check(tensor.data.empty(), "zero element tensor", "zero tensor has data");
     }
 }
@@ -198,7 +198,7 @@ static void test_dtype_mapping()
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
     {
-        const pnnx::ExportedTensorMeta meta = make_meta(cases[i].exported_type, std::vector<int64_t>{1}, std::vector<int64_t>{1}, 0);
+        const pnnx::ExportedTensorMeta meta = make_meta(cases[i].exported_type, std::vector<int64_t> {1}, std::vector<int64_t> {1}, 0);
         const std::vector<char> storage(cases[i].element_size, 0);
         pnnx::MaterializedExportedTensor tensor;
         if (expect_success(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, tensor, "dtype mapping"))
@@ -216,7 +216,7 @@ static void test_byte_order()
     append_int32(storage, -2, pnnx::PT2_BYTE_ORDER_BIG);
 
     pnnx::MaterializedExportedTensor tensor;
-    const pnnx::ExportedTensorMeta int_meta = make_meta(4, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    const pnnx::ExportedTensorMeta int_meta = make_meta(4, std::vector<int64_t> {2}, std::vector<int64_t> {1}, 0);
     if (expect_success(int_meta, storage, pnnx::PT2_BYTE_ORDER_BIG, tensor, "big endian i32"))
     {
         const std::vector<int32_t> values = read_native_values<int32_t>(tensor.data);
@@ -229,54 +229,54 @@ static void test_byte_order()
     append_float(storage, 3.f, pnnx::PT2_BYTE_ORDER_BIG);
     append_float(storage, 4.f, pnnx::PT2_BYTE_ORDER_BIG);
 
-    const pnnx::ExportedTensorMeta complex_meta = make_meta(10, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    const pnnx::ExportedTensorMeta complex_meta = make_meta(10, std::vector<int64_t> {2}, std::vector<int64_t> {1}, 0);
     if (expect_success(complex_meta, storage, pnnx::PT2_BYTE_ORDER_BIG, tensor, "big endian complex64"))
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{1.f, 2.f, 3.f, 4.f}), "big endian complex64", "complex components changed");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {1.f, 2.f, 3.f, 4.f}), "big endian complex64", "complex components changed");
 
     storage = make_float_storage(6, pnnx::PT2_BYTE_ORDER_BIG);
-    const pnnx::ExportedTensorMeta transposed_meta = make_meta(7, std::vector<int64_t>{2, 3}, std::vector<int64_t>{1, 2}, 0);
+    const pnnx::ExportedTensorMeta transposed_meta = make_meta(7, std::vector<int64_t> {2, 3}, std::vector<int64_t> {1, 2}, 0);
     if (expect_success(transposed_meta, storage, pnnx::PT2_BYTE_ORDER_BIG, tensor, "big endian transposed f32"))
-        check(same_floats(read_native_values<float>(tensor.data), std::vector<float>{0.f, 2.f, 4.f, 1.f, 3.f, 5.f}), "big endian transposed f32", "wrong values");
+        check(same_floats(read_native_values<float>(tensor.data), std::vector<float> {0.f, 2.f, 4.f, 1.f, 3.f, 5.f}), "big endian transposed f32", "wrong values");
 }
 
 static void test_errors()
 {
     const std::vector<char> storage = make_float_storage(6, pnnx::PT2_BYTE_ORDER_LITTLE);
 
-    expect_error(make_meta(0, std::vector<int64_t>{1}, std::vector<int64_t>{1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "unsupported exported tensor dtype", "unknown dtype");
-    expect_error(make_meta(28, std::vector<int64_t>{1}, std::vector<int64_t>{1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "unsupported exported tensor dtype", "unsupported uint16 dtype");
-    expect_error(make_meta(7, std::vector<int64_t>{-1}, std::vector<int64_t>{1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "negative tensor size", "negative size");
-    expect_error(make_meta(7, std::vector<int64_t>{(int64_t)INT_MAX + 1}, std::vector<int64_t>{1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "does not fit pnnx shape", "shape int overflow");
-    expect_error(make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>(), 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "stride rank does not match", "stride rank mismatch");
-    expect_error(make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{-1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "negative tensor stride", "negative stride");
-    expect_error(make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, -1), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "negative storage offset", "negative storage offset");
+    expect_error(make_meta(0, std::vector<int64_t> {1}, std::vector<int64_t> {1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "unsupported exported tensor dtype", "unknown dtype");
+    expect_error(make_meta(28, std::vector<int64_t> {1}, std::vector<int64_t> {1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "unsupported exported tensor dtype", "unsupported uint16 dtype");
+    expect_error(make_meta(7, std::vector<int64_t> {-1}, std::vector<int64_t> {1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "negative tensor size", "negative size");
+    expect_error(make_meta(7, std::vector<int64_t> {(int64_t)INT_MAX + 1}, std::vector<int64_t> {1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "does not fit pnnx shape", "shape int overflow");
+    expect_error(make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t>(), 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "stride rank does not match", "stride rank mismatch");
+    expect_error(make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t> {-1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "negative tensor stride", "negative stride");
+    expect_error(make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t> {1}, -1), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "negative storage offset", "negative storage offset");
 
-    pnnx::ExportedTensorMeta meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    pnnx::ExportedTensorMeta meta = make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t> {1}, 0);
     meta.layout = 1;
     expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "unsupported tensor layout", "sparse layout");
 
-    meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    meta = make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t> {1}, 0);
     meta.sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     meta.sizes[0].expression = "Symbol('u0', integer=True)";
     expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "symbolic tensor size at dimension 0 cannot be materialized", "symbolic state size");
 
-    meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    meta = make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t> {1}, 0);
     meta.strides[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     meta.strides[0].expression = "Symbol('u0', integer=True)";
     expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "symbolic tensor stride at dimension 0 cannot be materialized", "symbolic state stride");
 
-    meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    meta = make_meta(7, std::vector<int64_t> {2}, std::vector<int64_t> {1}, 0);
     meta.storage_offset.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     meta.storage_offset.expression = "Symbol('u0', integer=True)";
     expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "symbolic storage offset cannot be materialized", "symbolic state offset");
 
-    expect_error(make_meta(7, std::vector<int64_t>{1}, std::vector<int64_t>{1}, 0), std::vector<char>(3, 0), pnnx::PT2_BYTE_ORDER_LITTLE, "not aligned to element size", "unaligned storage");
-    expect_error(make_meta(7, std::vector<int64_t>{1}, std::vector<int64_t>{1}, 6), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor view exceeds storage", "offset out of bounds");
-    expect_error(make_meta(7, std::vector<int64_t>{2, 2}, std::vector<int64_t>{5, 1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor view exceeds storage", "strided view out of bounds");
-    expect_error(make_meta(7, std::vector<int64_t>{2, 3}, std::vector<int64_t>{0, 1}, 0), make_float_storage(3, pnnx::PT2_BYTE_ORDER_LITTLE), pnnx::PT2_BYTE_ORDER_LITTLE, "overlapping tensor view expands storage", "broadcast view expansion");
-    expect_error(make_meta(7, std::vector<int64_t>{46341, 46341}, std::vector<int64_t>{0, 0}, 0), make_float_storage(1, pnnx::PT2_BYTE_ORDER_LITTLE), pnnx::PT2_BYTE_ORDER_LITTLE, "tensor element count does not fit pnnx attribute", "pnnx element count overflow");
-    expect_error(make_meta(7, std::vector<int64_t>{INT_MAX, INT_MAX, INT_MAX}, std::vector<int64_t>{0, 0, 0}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor element count overflow", "element count overflow");
-    expect_error(make_meta(7, std::vector<int64_t>{INT_MAX}, std::vector<int64_t>{std::numeric_limits<int64_t>::max()}, std::numeric_limits<int64_t>::max()), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor view offset overflow", "view offset overflow");
+    expect_error(make_meta(7, std::vector<int64_t> {1}, std::vector<int64_t> {1}, 0), std::vector<char>(3, 0), pnnx::PT2_BYTE_ORDER_LITTLE, "not aligned to element size", "unaligned storage");
+    expect_error(make_meta(7, std::vector<int64_t> {1}, std::vector<int64_t> {1}, 6), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor view exceeds storage", "offset out of bounds");
+    expect_error(make_meta(7, std::vector<int64_t> {2, 2}, std::vector<int64_t> {5, 1}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor view exceeds storage", "strided view out of bounds");
+    expect_error(make_meta(7, std::vector<int64_t> {2, 3}, std::vector<int64_t> {0, 1}, 0), make_float_storage(3, pnnx::PT2_BYTE_ORDER_LITTLE), pnnx::PT2_BYTE_ORDER_LITTLE, "overlapping tensor view expands storage", "broadcast view expansion");
+    expect_error(make_meta(7, std::vector<int64_t> {46341, 46341}, std::vector<int64_t> {0, 0}, 0), make_float_storage(1, pnnx::PT2_BYTE_ORDER_LITTLE), pnnx::PT2_BYTE_ORDER_LITTLE, "tensor element count does not fit pnnx attribute", "pnnx element count overflow");
+    expect_error(make_meta(7, std::vector<int64_t> {INT_MAX, INT_MAX, INT_MAX}, std::vector<int64_t> {0, 0, 0}, 0), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor element count overflow", "element count overflow");
+    expect_error(make_meta(7, std::vector<int64_t> {INT_MAX}, std::vector<int64_t> {std::numeric_limits<int64_t>::max()}, std::numeric_limits<int64_t>::max()), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor view offset overflow", "view offset overflow");
 }
 
 static std::string join_shape(const std::vector<int>& shape)

@@ -364,9 +364,9 @@ static void expect_symbolic_tensor_meta()
 {
     const std::string label = "tensor symbolic metadata";
     const std::string text = tensor_meta_json(
-        "[{\"as_expr\":{\"expr_str\":\"Symbol('u0', integer=True)\",\"hint\":null}},{\"as_int\":4}]",
-        "[{\"as_expr\":{\"expr_str\":\"Mul(Integer(4), Symbol('u0', integer=True))\",\"hint\":{\"as_int\":12}}},{\"as_int\":1}]",
-        "{\"as_expr\":{\"expr_str\":\"Symbol('u1', integer=True)\",\"hint\":{\"as_int\":2}}}");
+                                 "[{\"as_expr\":{\"expr_str\":\"Symbol('u0', integer=True)\",\"hint\":null}},{\"as_int\":4}]",
+                                 "[{\"as_expr\":{\"expr_str\":\"Mul(Integer(4), Symbol('u0', integer=True))\",\"hint\":{\"as_int\":12}}},{\"as_int\":1}]",
+                                 "{\"as_expr\":{\"expr_str\":\"Symbol('u1', integer=True)\",\"hint\":{\"as_int\":2}}}");
 
     test_paths++;
     pnnx::JsonValue value;
@@ -1177,8 +1177,8 @@ static int inspect_package(const std::string& path, bool print_graph_details)
     pnnx::JsonValue weights_json;
     pnnx::JsonValue constants_json;
     if (reader.read_json(reader.layout().model_json_path, model_json, archive_error) != 0
-        || reader.read_json(reader.layout().weights_config_path, weights_json, archive_error) != 0
-        || reader.read_json(reader.layout().constants_config_path, constants_json, archive_error) != 0)
+            || reader.read_json(reader.layout().weights_config_path, weights_json, archive_error) != 0
+            || reader.read_json(reader.layout().constants_config_path, constants_json, archive_error) != 0)
     {
         fprintf(stderr, "%s\n", archive_error.c_str());
         return 1;
@@ -1189,8 +1189,8 @@ static int inspect_package(const std::string& path, bool print_graph_details)
     pnnx::ExportedPayloadConfig constants;
     pnnx::ExportedSchemaError schema_error;
     if (pnnx::parse_exported_program(model_json, program, schema_error) != 0
-        || pnnx::parse_exported_payload_config(weights_json, weights, schema_error) != 0
-        || pnnx::parse_exported_payload_config(constants_json, constants, schema_error) != 0)
+            || pnnx::parse_exported_payload_config(weights_json, weights, schema_error) != 0
+            || pnnx::parse_exported_payload_config(constants_json, constants, schema_error) != 0)
     {
         fprintf(stderr, "%s %s\n", schema_error.path.c_str(), schema_error.message.c_str());
         return 1;

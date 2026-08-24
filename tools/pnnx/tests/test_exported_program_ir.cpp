@@ -242,8 +242,8 @@ static pnnx::MaterializedExportedTensor make_float_state_tensor(const std::vecto
 static std::map<std::string, pnnx::MaterializedExportedTensor> make_linear_state()
 {
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["linear.weight"] = make_state_tensor(std::vector<int>{3, 4}, 48);
-    state["linear.bias"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["linear.weight"] = make_state_tensor(std::vector<int> {3, 4}, 48);
+    state["linear.bias"] = make_state_tensor(std::vector<int> {3}, 12);
     return state;
 }
 
@@ -279,11 +279,11 @@ static pnnx::ExportedProgram make_linear_relu_program()
 
     program.graph.outputs.push_back(make_tensor("relu"));
 
-    program.graph.tensor_values["p_linear_weight"] = make_tensor_meta(std::vector<int64_t>{3, 4});
-    program.graph.tensor_values["p_linear_bias"] = make_tensor_meta(std::vector<int64_t>{3});
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{2, 4});
-    program.graph.tensor_values["linear"] = make_tensor_meta(std::vector<int64_t>{2, 3});
-    program.graph.tensor_values["relu"] = make_tensor_meta(std::vector<int64_t>{2, 3});
+    program.graph.tensor_values["p_linear_weight"] = make_tensor_meta(std::vector<int64_t> {3, 4});
+    program.graph.tensor_values["p_linear_bias"] = make_tensor_meta(std::vector<int64_t> {3});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {2, 4});
+    program.graph.tensor_values["linear"] = make_tensor_meta(std::vector<int64_t> {2, 3});
+    program.graph.tensor_values["relu"] = make_tensor_meta(std::vector<int64_t> {2, 3});
 
     pnnx::ExportedInputSpec weight;
     weight.kind = pnnx::EXPORTED_PARAMETER;
@@ -386,10 +386,10 @@ static pnnx::ExportedProgram make_bounded_dynamic_result_program(bool legacy_ran
     program.graph.nodes.push_back(assert_max);
 
     program.graph.outputs.push_back(make_tensor("selected"));
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 16});
-    program.graph.tensor_values["mask"] = make_tensor_meta(std::vector<int64_t>{1, 3, 16});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 3, 16});
+    program.graph.tensor_values["mask"] = make_tensor_meta(std::vector<int64_t> {1, 3, 16});
     program.graph.tensor_values["mask"].dtype = 12;
-    program.graph.tensor_values["selected"] = make_tensor_meta(std::vector<int64_t>{1});
+    program.graph.tensor_values["selected"] = make_tensor_meta(std::vector<int64_t> {1});
     program.graph.tensor_values["selected"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     program.graph.tensor_values["selected"].sizes[0].expression = "Symbol('u0', integer=True)";
 
@@ -465,10 +465,10 @@ static pnnx::ExportedProgram make_dynamic_input_program()
     program.graph.nodes.push_back(slice);
 
     program.graph.outputs.push_back(make_tensor("slice"));
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 2});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 2});
     program.graph.tensor_values["x"].sizes[1].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     program.graph.tensor_values["x"].sizes[1].expression = "Symbol('s0', positive=True, integer=True)";
-    program.graph.tensor_values["slice"] = make_tensor_meta(std::vector<int64_t>{1, 1});
+    program.graph.tensor_values["slice"] = make_tensor_meta(std::vector<int64_t> {1, 1});
     program.graph.tensor_values["slice"].sizes[1].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     program.graph.tensor_values["slice"].sizes[1].expression = "FloorDiv(Symbol('s0', positive=True, integer=True), Integer(2))";
 
@@ -527,8 +527,8 @@ static pnnx::ExportedProgram make_higher_order_program(bool autocast_enabled = f
     sigmoid.outputs.push_back(make_tensor("sub_output"));
     autocast_graph.nodes.push_back(sigmoid);
     autocast_graph.outputs.push_back(make_tensor("sub_output"));
-    autocast_graph.tensor_values["sub_input"] = make_tensor_meta(std::vector<int64_t>{2, 4});
-    autocast_graph.tensor_values["sub_output"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    autocast_graph.tensor_values["sub_input"] = make_tensor_meta(std::vector<int64_t> {2, 4});
+    autocast_graph.tensor_values["sub_output"] = make_tensor_meta(std::vector<int64_t> {2, 4});
 
     pnnx::ExportedGraph grad_graph;
     grad_graph.inputs.push_back(make_tensor("captured"));
@@ -560,9 +560,9 @@ static pnnx::ExportedProgram make_higher_order_program(bool autocast_enabled = f
     autocast.outputs.push_back(make_tensor("inner_output"));
     grad_graph.nodes.push_back(autocast);
     grad_graph.outputs.push_back(make_tensor("inner_output"));
-    grad_graph.tensor_values["captured"] = make_tensor_meta(std::vector<int64_t>{2, 4});
-    grad_graph.tensor_values["inner_input"] = make_tensor_meta(std::vector<int64_t>{2, 4});
-    grad_graph.tensor_values["inner_output"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    grad_graph.tensor_values["captured"] = make_tensor_meta(std::vector<int64_t> {2, 4});
+    grad_graph.tensor_values["inner_input"] = make_tensor_meta(std::vector<int64_t> {2, 4});
+    grad_graph.tensor_values["inner_output"] = make_tensor_meta(std::vector<int64_t> {2, 4});
 
     pnnx::ExportedNode set_grad;
     set_grad.name = "set_grad";
@@ -575,9 +575,9 @@ static pnnx::ExportedProgram make_higher_order_program(bool autocast_enabled = f
     program.graph.nodes.push_back(set_grad);
 
     program.graph.outputs.push_back(make_tensor("z"));
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{2, 4});
-    program.graph.tensor_values["inner_input"] = make_tensor_meta(std::vector<int64_t>{2, 4});
-    program.graph.tensor_values["z"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {2, 4});
+    program.graph.tensor_values["inner_input"] = make_tensor_meta(std::vector<int64_t> {2, 4});
+    program.graph.tensor_values["z"] = make_tensor_meta(std::vector<int64_t> {2, 4});
 
     pnnx::ExportedInputSpec input;
     input.kind = pnnx::EXPORTED_USER_INPUT;
@@ -613,9 +613,9 @@ static pnnx::ExportedProgram make_conv2d_program()
     program.graph.nodes.push_back(conv);
     program.graph.outputs.push_back(make_tensor("conv2d"));
 
-    program.graph.tensor_values["p_conv_weight"] = make_tensor_meta(std::vector<int64_t>{3, 4, 3, 3});
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 4, 8, 8});
-    program.graph.tensor_values["conv2d"] = make_tensor_meta(std::vector<int64_t>{1, 3, 6, 6});
+    program.graph.tensor_values["p_conv_weight"] = make_tensor_meta(std::vector<int64_t> {3, 4, 3, 3});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 4, 8, 8});
+    program.graph.tensor_values["conv2d"] = make_tensor_meta(std::vector<int64_t> {1, 3, 6, 6});
 
     pnnx::ExportedInputSpec weight;
     weight.kind = pnnx::EXPORTED_PARAMETER;
@@ -666,12 +666,12 @@ static pnnx::ExportedProgram make_batch_norm_program()
     program.graph.nodes.push_back(batch_norm);
     program.graph.outputs.push_back(make_tensor("batch_norm"));
 
-    program.graph.tensor_values["p_weight"] = make_tensor_meta(std::vector<int64_t>{3});
-    program.graph.tensor_values["p_bias"] = make_tensor_meta(std::vector<int64_t>{3});
-    program.graph.tensor_values["b_running_mean"] = make_tensor_meta(std::vector<int64_t>{3});
-    program.graph.tensor_values["b_running_var"] = make_tensor_meta(std::vector<int64_t>{3});
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 6, 6});
-    program.graph.tensor_values["batch_norm"] = make_tensor_meta(std::vector<int64_t>{1, 3, 6, 6});
+    program.graph.tensor_values["p_weight"] = make_tensor_meta(std::vector<int64_t> {3});
+    program.graph.tensor_values["p_bias"] = make_tensor_meta(std::vector<int64_t> {3});
+    program.graph.tensor_values["b_running_mean"] = make_tensor_meta(std::vector<int64_t> {3});
+    program.graph.tensor_values["b_running_var"] = make_tensor_meta(std::vector<int64_t> {3});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 3, 6, 6});
+    program.graph.tensor_values["batch_norm"] = make_tensor_meta(std::vector<int64_t> {1, 3, 6, 6});
 
     const pnnx::ExportedInputKind state_kinds[] = {pnnx::EXPORTED_PARAMETER, pnnx::EXPORTED_PARAMETER, pnnx::EXPORTED_BUFFER, pnnx::EXPORTED_BUFFER};
     const char* state_targets[] = {"weight", "bias", "running_mean", "running_var"};
@@ -716,8 +716,8 @@ static pnnx::ExportedProgram make_inplace_relu_program()
     program.graph.nodes.push_back(relu);
     program.graph.outputs.push_back(make_tensor("relu_"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{2, 3});
-    program.graph.tensor_values["relu_"] = make_tensor_meta(std::vector<int64_t>{2, 3});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {2, 3});
+    program.graph.tensor_values["relu_"] = make_tensor_meta(std::vector<int64_t> {2, 3});
 
     pnnx::ExportedInputSpec input;
     input.kind = pnnx::EXPORTED_USER_INPUT;
@@ -745,17 +745,17 @@ static pnnx::ExportedProgram make_max_pool2d_program()
     max_pool2d.has_name = true;
     max_pool2d.target = "torch.ops.aten.max_pool2d.default";
     max_pool2d.inputs.push_back(make_input("self", make_tensor("x")));
-    max_pool2d.inputs.push_back(make_input("kernel_size", make_ints(std::vector<int64_t>{3, 3})));
-    max_pool2d.inputs.push_back(make_input("stride", make_ints(std::vector<int64_t>{2, 2})));
-    max_pool2d.inputs.push_back(make_input("padding", make_ints(std::vector<int64_t>{1, 1})));
-    max_pool2d.inputs.push_back(make_input("dilation", make_ints(std::vector<int64_t>{1, 1})));
+    max_pool2d.inputs.push_back(make_input("kernel_size", make_ints(std::vector<int64_t> {3, 3})));
+    max_pool2d.inputs.push_back(make_input("stride", make_ints(std::vector<int64_t> {2, 2})));
+    max_pool2d.inputs.push_back(make_input("padding", make_ints(std::vector<int64_t> {1, 1})));
+    max_pool2d.inputs.push_back(make_input("dilation", make_ints(std::vector<int64_t> {1, 1})));
     max_pool2d.inputs.push_back(make_input("ceil_mode", make_bool(false)));
     max_pool2d.outputs.push_back(make_tensor("max_pool2d"));
     program.graph.nodes.push_back(max_pool2d);
     program.graph.outputs.push_back(make_tensor("max_pool2d"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 8, 8});
-    program.graph.tensor_values["max_pool2d"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 3, 8, 8});
+    program.graph.tensor_values["max_pool2d"] = make_tensor_meta(std::vector<int64_t> {1, 3, 4, 4});
 
     pnnx::ExportedInputSpec input;
     input.kind = pnnx::EXPORTED_USER_INPUT;
@@ -789,9 +789,9 @@ static pnnx::ExportedProgram make_inplace_add_program()
     program.graph.nodes.push_back(add);
     program.graph.outputs.push_back(make_tensor("add_"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
-    program.graph.tensor_values["other"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
-    program.graph.tensor_values["add_"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 3, 4, 4});
+    program.graph.tensor_values["other"] = make_tensor_meta(std::vector<int64_t> {1, 3, 4, 4});
+    program.graph.tensor_values["add_"] = make_tensor_meta(std::vector<int64_t> {1, 3, 4, 4});
 
     const char* input_names[] = {"x", "other"};
     for (size_t i = 0; i < sizeof(input_names) / sizeof(input_names[0]); i++)
@@ -823,13 +823,13 @@ static pnnx::ExportedProgram make_adaptive_avg_pool2d_program()
     adaptive_avg_pool2d.has_name = true;
     adaptive_avg_pool2d.target = "torch.ops.aten.adaptive_avg_pool2d.default";
     adaptive_avg_pool2d.inputs.push_back(make_input("self", make_tensor("x")));
-    adaptive_avg_pool2d.inputs.push_back(make_input("output_size", make_ints(std::vector<int64_t>{1, 1})));
+    adaptive_avg_pool2d.inputs.push_back(make_input("output_size", make_ints(std::vector<int64_t> {1, 1})));
     adaptive_avg_pool2d.outputs.push_back(make_tensor("adaptive_avg_pool2d"));
     program.graph.nodes.push_back(adaptive_avg_pool2d);
     program.graph.outputs.push_back(make_tensor("adaptive_avg_pool2d"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 512, 7, 7});
-    program.graph.tensor_values["adaptive_avg_pool2d"] = make_tensor_meta(std::vector<int64_t>{1, 512, 1, 1});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 512, 7, 7});
+    program.graph.tensor_values["adaptive_avg_pool2d"] = make_tensor_meta(std::vector<int64_t> {1, 512, 1, 1});
 
     pnnx::ExportedInputSpec input;
     input.kind = pnnx::EXPORTED_USER_INPUT;
@@ -863,8 +863,8 @@ static pnnx::ExportedProgram make_flatten_program()
     program.graph.nodes.push_back(flatten);
     program.graph.outputs.push_back(make_tensor("flatten"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 512, 1, 1});
-    program.graph.tensor_values["flatten"] = make_tensor_meta(std::vector<int64_t>{1, 512});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 512, 1, 1});
+    program.graph.tensor_values["flatten"] = make_tensor_meta(std::vector<int64_t> {1, 512});
 
     pnnx::ExportedInputSpec input;
     input.kind = pnnx::EXPORTED_USER_INPUT;
@@ -892,15 +892,15 @@ static pnnx::ExportedProgram make_cat_program()
     cat.name = "cat";
     cat.has_name = true;
     cat.target = "torch.ops.aten.cat.default";
-    cat.inputs.push_back(make_input("tensors", make_tensors(std::vector<std::string>{"x", "y"})));
+    cat.inputs.push_back(make_input("tensors", make_tensors(std::vector<std::string> {"x", "y"})));
     cat.inputs.push_back(make_input("dim", make_int(1)));
     cat.outputs.push_back(make_tensor("cat"));
     program.graph.nodes.push_back(cat);
     program.graph.outputs.push_back(make_tensor("cat"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 2});
-    program.graph.tensor_values["y"] = make_tensor_meta(std::vector<int64_t>{1, 2});
-    program.graph.tensor_values["cat"] = make_tensor_meta(std::vector<int64_t>{1, 4});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 2});
+    program.graph.tensor_values["y"] = make_tensor_meta(std::vector<int64_t> {1, 2});
+    program.graph.tensor_values["cat"] = make_tensor_meta(std::vector<int64_t> {1, 4});
 
     const char* input_names[] = {"x", "y"};
     for (size_t i = 0; i < sizeof(input_names) / sizeof(input_names[0]); i++)
@@ -934,14 +934,14 @@ static pnnx::ExportedProgram make_chunk_program()
     chunk.inputs.push_back(make_input("self", make_tensor("x")));
     chunk.inputs.push_back(make_input("chunks", make_int(2)));
     chunk.inputs.push_back(make_input("dim", make_int(1)));
-    chunk.outputs.push_back(make_tensors(std::vector<std::string>{"chunk_0", "chunk_1"}));
+    chunk.outputs.push_back(make_tensors(std::vector<std::string> {"chunk_0", "chunk_1"}));
     program.graph.nodes.push_back(chunk);
     program.graph.outputs.push_back(make_tensor("chunk_0"));
     program.graph.outputs.push_back(make_tensor("chunk_1"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 4});
-    program.graph.tensor_values["chunk_0"] = make_tensor_meta(std::vector<int64_t>{1, 2});
-    program.graph.tensor_values["chunk_1"] = make_tensor_meta(std::vector<int64_t>{1, 2});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 4});
+    program.graph.tensor_values["chunk_0"] = make_tensor_meta(std::vector<int64_t> {1, 2});
+    program.graph.tensor_values["chunk_1"] = make_tensor_meta(std::vector<int64_t> {1, 2});
 
     pnnx::ExportedInputSpec input;
     input.kind = pnnx::EXPORTED_USER_INPUT;
@@ -978,8 +978,8 @@ static pnnx::ExportedProgram make_unary_program(const std::string& target, const
     program.graph.nodes.push_back(node);
     program.graph.outputs.push_back(make_tensor(output_name));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
-    program.graph.tensor_values[output_name] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 3, 4, 4});
+    program.graph.tensor_values[output_name] = make_tensor_meta(std::vector<int64_t> {1, 3, 4, 4});
 
     pnnx::ExportedInputSpec input;
     input.kind = pnnx::EXPORTED_USER_INPUT;
@@ -1014,9 +1014,9 @@ static pnnx::ExportedProgram make_weight_norm_program(bool static_weight)
     program.graph.nodes.push_back(weight_norm);
     program.graph.outputs.push_back(make_tensor("normalized_weight"));
 
-    program.graph.tensor_values["weight_v"] = make_tensor_meta(std::vector<int64_t>{2, 3});
-    program.graph.tensor_values["weight_g"] = make_tensor_meta(std::vector<int64_t>{2, 1});
-    program.graph.tensor_values["normalized_weight"] = make_tensor_meta(std::vector<int64_t>{2, 3});
+    program.graph.tensor_values["weight_v"] = make_tensor_meta(std::vector<int64_t> {2, 3});
+    program.graph.tensor_values["weight_g"] = make_tensor_meta(std::vector<int64_t> {2, 1});
+    program.graph.tensor_values["normalized_weight"] = make_tensor_meta(std::vector<int64_t> {2, 3});
 
     const std::vector<std::string> input_names = {"weight_v", "weight_g"};
     for (size_t i = 0; i < input_names.size(); i++)
@@ -1072,12 +1072,12 @@ static pnnx::ExportedProgram make_torchvision_deform_conv2d_program(bool use_mas
     program.graph.nodes.push_back(deform_conv2d);
     program.graph.outputs.push_back(make_tensor("out"));
 
-    program.graph.tensor_values["p_weight"] = make_tensor_meta(std::vector<int64_t>{16, 6, 3, 5});
-    program.graph.tensor_values["p_bias"] = make_tensor_meta(std::vector<int64_t>{16});
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 12, 32, 32});
-    program.graph.tensor_values["offset"] = make_tensor_meta(std::vector<int64_t>{1, 30, 16, 28});
-    program.graph.tensor_values["mask"] = make_tensor_meta(use_mask ? std::vector<int64_t>{1, 15, 16, 28} : std::vector<int64_t>{1, 1});
-    program.graph.tensor_values["out"] = make_tensor_meta(std::vector<int64_t>{1, 16, 16, 28});
+    program.graph.tensor_values["p_weight"] = make_tensor_meta(std::vector<int64_t> {16, 6, 3, 5});
+    program.graph.tensor_values["p_bias"] = make_tensor_meta(std::vector<int64_t> {16});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 12, 32, 32});
+    program.graph.tensor_values["offset"] = make_tensor_meta(std::vector<int64_t> {1, 30, 16, 28});
+    program.graph.tensor_values["mask"] = make_tensor_meta(use_mask ? std::vector<int64_t> {1, 15, 16, 28} : std::vector<int64_t> {1, 1});
+    program.graph.tensor_values["out"] = make_tensor_meta(std::vector<int64_t> {1, 16, 16, 28});
 
     pnnx::ExportedInputSpec weight;
     weight.kind = pnnx::EXPORTED_PARAMETER;
@@ -1133,9 +1133,9 @@ static pnnx::ExportedProgram make_torchvision_roi_align_program()
     program.graph.nodes.push_back(roi_align);
     program.graph.outputs.push_back(make_tensor("out"));
 
-    program.graph.tensor_values["p_rois"] = make_tensor_meta(std::vector<int64_t>{2, 5});
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 12, 64, 64});
-    program.graph.tensor_values["out"] = make_tensor_meta(std::vector<int64_t>{2, 12, 3, 5});
+    program.graph.tensor_values["p_rois"] = make_tensor_meta(std::vector<int64_t> {2, 5});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 12, 64, 64});
+    program.graph.tensor_values["out"] = make_tensor_meta(std::vector<int64_t> {2, 12, 3, 5});
 
     pnnx::ExportedInputSpec rois;
     rois.kind = pnnx::EXPORTED_PARAMETER;
@@ -1216,8 +1216,8 @@ static void test_linear_relu_graph()
 {
     const pnnx::ExportedProgram program = make_linear_relu_program();
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["linear.weight"] = make_state_tensor(std::vector<int>{3, 4}, 48);
-    state["linear.bias"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["linear.weight"] = make_state_tensor(std::vector<int> {3, 4}, 48);
+    state["linear.bias"] = make_state_tensor(std::vector<int> {3}, 12);
 
     pnnx::Graph graph;
     std::string error = "stale";
@@ -1267,8 +1267,8 @@ static void test_torchvision_custom_operator_lowering()
     {
         const pnnx::ExportedProgram program = make_torchvision_deform_conv2d_program(use_mask != 0);
         std::map<std::string, pnnx::MaterializedExportedTensor> state;
-        state["deform.weight"] = make_state_tensor(std::vector<int>{16, 6, 3, 5}, 16 * 6 * 3 * 5 * 4);
-        state["deform.bias"] = make_state_tensor(std::vector<int>{16}, 16 * 4);
+        state["deform.weight"] = make_state_tensor(std::vector<int> {16, 6, 3, 5}, 16 * 6 * 3 * 5 * 4);
+        state["deform.bias"] = make_state_tensor(std::vector<int> {16}, 16 * 4);
 
         pnnx::Graph graph;
         std::string error = "stale";
@@ -1300,7 +1300,7 @@ static void test_torchvision_custom_operator_lowering()
 
     const pnnx::ExportedProgram program = make_torchvision_roi_align_program();
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["roi_align.rois"] = make_state_tensor(std::vector<int>{2, 5}, 2 * 5 * 4);
+    state["roi_align.rois"] = make_state_tensor(std::vector<int> {2, 5}, 2 * 5 * 4);
 
     pnnx::Graph graph;
     std::string error = "stale";
@@ -1388,7 +1388,7 @@ static pnnx::ExportedGraph make_symbolic_integer_comparison_graph(bool graph_out
 {
     pnnx::ExportedGraph graph;
     graph.inputs.push_back(make_tensor("x"));
-    graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+    graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {2, 4});
 
     pnnx::ExportedNode sym_size;
     sym_size.name = "size";
@@ -1499,7 +1499,7 @@ static void test_symbolic_scalar_graph_normalization()
         arange.outputs.push_back(make_tensor("arange"));
         graph.nodes.push_back(arange);
         graph.outputs.push_back(make_tensor("arange"));
-        graph.tensor_values["arange"] = make_tensor_meta(std::vector<int64_t>{4});
+        graph.tensor_values["arange"] = make_tensor_meta(std::vector<int64_t> {4});
 
         pnnx::ExportedSymFloat sym_float;
         sym_float.is_expression = true;
@@ -1528,7 +1528,8 @@ static void test_symbolic_scalar_graph_normalization()
         const pnnx::ExportedGraph cases[] = {
             make_symbolic_integer_comparison_graph(true, false, false),
             make_symbolic_integer_comparison_graph(false, true, false),
-            make_symbolic_integer_comparison_graph(false, true, true)};
+            make_symbolic_integer_comparison_graph(false, true, true)
+        };
         const char* names[] = {"symbolic comparison output", "symbolic comparison consumer", "symbolic comparison multiple consumers"};
         for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
         {
@@ -1558,7 +1559,7 @@ static void test_symbolic_scalar_graph_normalization()
     {
         pnnx::ExportedGraph graph;
         graph.inputs.push_back(make_tensor("x"));
-        graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 4});
+        graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {1, 4});
 
         pnnx::ExportedNode sym_size;
         sym_size.name = "size";
@@ -1574,13 +1575,14 @@ static void test_symbolic_scalar_graph_normalization()
         reshape.has_name = true;
         reshape.target = "torch.ops.aten.reshape.default";
         reshape.inputs.push_back(make_input("self", "x"));
-        reshape.inputs.push_back(make_input("shape", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement>{
-                                                         make_symbolic_sym_int_list_element("size"),
-                                                         make_static_sym_int_list_element(192)})));
+        reshape.inputs.push_back(make_input("shape", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement> {
+            make_symbolic_sym_int_list_element("size"),
+            make_static_sym_int_list_element(192)
+        })));
         reshape.outputs.push_back(make_tensor("reshape"));
         graph.nodes.push_back(reshape);
         graph.outputs.push_back(make_tensor("reshape"));
-        graph.tensor_values["reshape"] = make_tensor_meta(std::vector<int64_t>{4, 192});
+        graph.tensor_values["reshape"] = make_tensor_meta(std::vector<int64_t> {4, 192});
 
         pnnx::ExportedSymInt sym_int;
         sym_int.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
@@ -1598,7 +1600,7 @@ static void test_symbolic_scalar_graph_normalization()
     {
         pnnx::ExportedGraph graph;
         graph.inputs.push_back(make_tensor("x"));
-        graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{4, 8});
+        graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {4, 8});
 
         pnnx::ExportedNode sym_size;
         sym_size.name = "size";
@@ -1693,7 +1695,7 @@ static pnnx::ExportedProgram make_symbolic_scalar_lowering_program()
     program.graph.tensor_values["condition"].dtype = 12;
     program.graph.tensor_values["condition_tensor"] = make_tensor_meta(std::vector<int64_t>());
     program.graph.tensor_values["condition_tensor"].dtype = 12;
-    program.graph.tensor_values["arange"] = make_tensor_meta(std::vector<int64_t>{4});
+    program.graph.tensor_values["arange"] = make_tensor_meta(std::vector<int64_t> {4});
     program.graph.tensor_values["arange"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     program.graph.tensor_values["arange"].sizes[0].expression = "TruncToInt(Add(Symbol('zuf1'), Mul(Integer(-1), Symbol('zuf0'))))";
 
@@ -1758,11 +1760,12 @@ static pnnx::ExportedProgram make_symbolic_integer_list_lowering_program()
     reshape.has_name = true;
     reshape.target = "torch.ops.aten.reshape.default";
     reshape.inputs.push_back(make_input("self", "x"));
-    reshape.inputs.push_back(make_input("shape", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement>{
-                                                     make_static_sym_int_list_element(3),
-                                                     make_static_sym_int_list_element(16),
-                                                     make_static_sym_int_list_element(16),
-                                                     make_symbolic_sym_int_list_element("sub")})));
+    reshape.inputs.push_back(make_input("shape", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement> {
+        make_static_sym_int_list_element(3),
+        make_static_sym_int_list_element(16),
+        make_static_sym_int_list_element(16),
+        make_symbolic_sym_int_list_element("sub")
+    })));
     reshape.outputs.push_back(make_tensor("reshape"));
     program.graph.nodes.push_back(reshape);
 
@@ -1771,20 +1774,21 @@ static pnnx::ExportedProgram make_symbolic_integer_list_lowering_program()
     expand.has_name = true;
     expand.target = "torch.ops.aten.expand.default";
     expand.inputs.push_back(make_input("self", "reshape"));
-    expand.inputs.push_back(make_input("size", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement>{
-                                                   make_symbolic_sym_int_list_element("size"),
-                                                   make_static_sym_int_list_element(192)})));
+    expand.inputs.push_back(make_input("size", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement> {
+        make_symbolic_sym_int_list_element("size"),
+        make_static_sym_int_list_element(192)
+    })));
     expand.outputs.push_back(make_tensor("expand"));
     program.graph.nodes.push_back(expand);
     program.graph.outputs.push_back(make_tensor("expand"));
 
-    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{3, 17, 16, 16});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t> {3, 17, 16, 16});
     program.graph.tensor_values["x"].sizes[1].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     program.graph.tensor_values["x"].sizes[1].expression = "Symbol('s0', positive=True, integer=True)";
-    program.graph.tensor_values["reshape"] = make_tensor_meta(std::vector<int64_t>{3, 16, 16, 16});
+    program.graph.tensor_values["reshape"] = make_tensor_meta(std::vector<int64_t> {3, 16, 16, 16});
     program.graph.tensor_values["reshape"].sizes[3].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     program.graph.tensor_values["reshape"].sizes[3].expression = "Add(Symbol('s0', positive=True, integer=True), Integer(-1))";
-    program.graph.tensor_values["expand"] = make_tensor_meta(std::vector<int64_t>{17, 192});
+    program.graph.tensor_values["expand"] = make_tensor_meta(std::vector<int64_t> {17, 192});
     program.graph.tensor_values["expand"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
     program.graph.tensor_values["expand"].sizes[0].expression = "Symbol('s0', positive=True, integer=True)";
 
@@ -1958,7 +1962,7 @@ static void test_higher_order_graph_lowering()
     expect_lower_error(missing_capture, std::map<std::string, pnnx::MaterializedExportedTensor>(), "captured argument count does not match subgraph input count", "missing higher order capture");
 
     pnnx::ExportedProgram mismatched_metadata = make_higher_order_program();
-    mismatched_metadata.graph.nodes[1].inputs[1].arg.graph_value->tensor_values["captured"] = make_tensor_meta(std::vector<int64_t>{1, 4});
+    mismatched_metadata.graph.nodes[1].inputs[1].arg.graph_value->tensor_values["captured"] = make_tensor_meta(std::vector<int64_t> {1, 4});
     expect_lower_error(mismatched_metadata, std::map<std::string, pnnx::MaterializedExportedTensor>(), "subgraph tensor metadata does not match bound value", "higher order metadata mismatch");
 }
 
@@ -1982,7 +1986,7 @@ static void test_complex_scalar_lowering()
     program.graph.nodes.push_back(sub);
     program.graph.outputs.push_back(make_tensor("sub"));
 
-    pnnx::ExportedTensorMeta meta = make_tensor_meta(std::vector<int64_t>{3, 15});
+    pnnx::ExportedTensorMeta meta = make_tensor_meta(std::vector<int64_t> {3, 15});
     meta.dtype = 10;
     program.graph.tensor_values["x"] = meta;
     program.graph.tensor_values["sub"] = meta;
@@ -2082,7 +2086,7 @@ static void test_linear_default_bias_constant()
     program.graph.nodes[0].inputs.erase(program.graph.nodes[0].inputs.begin() + 2);
 
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["linear.weight"] = make_state_tensor(std::vector<int>{3, 4}, 48);
+    state["linear.weight"] = make_state_tensor(std::vector<int> {3, 4}, 48);
 
     pnnx::Graph graph;
     std::string error = "stale";
@@ -2109,7 +2113,7 @@ static void test_conv2d_constant_arguments()
 {
     const pnnx::ExportedProgram program = make_conv2d_program();
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["conv.weight"] = make_state_tensor(std::vector<int>{3, 4, 3, 3}, 432);
+    state["conv.weight"] = make_state_tensor(std::vector<int> {3, 4, 3, 3}, 432);
 
     pnnx::Graph graph;
     std::string error = "stale";
@@ -2296,10 +2300,10 @@ static void test_batch_norm_constant_arguments()
 {
     const pnnx::ExportedProgram program = make_batch_norm_program();
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["weight"] = make_state_tensor(std::vector<int>{3}, 12);
-    state["bias"] = make_state_tensor(std::vector<int>{3}, 12);
-    state["running_mean"] = make_state_tensor(std::vector<int>{3}, 12);
-    state["running_var"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["weight"] = make_state_tensor(std::vector<int> {3}, 12);
+    state["bias"] = make_state_tensor(std::vector<int> {3}, 12);
+    state["running_mean"] = make_state_tensor(std::vector<int> {3}, 12);
+    state["running_var"] = make_state_tensor(std::vector<int> {3}, 12);
 
     pnnx::Graph graph;
     std::string error = "stale";
@@ -2338,10 +2342,10 @@ static void test_instance_norm_running_stats()
     instance_norm_node.inputs[5].name = "use_input_stats";
 
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["weight"] = make_state_tensor(std::vector<int>{3}, 12);
-    state["bias"] = make_state_tensor(std::vector<int>{3}, 12);
-    state["running_mean"] = make_state_tensor(std::vector<int>{3}, 12);
-    state["running_var"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["weight"] = make_state_tensor(std::vector<int> {3}, 12);
+    state["bias"] = make_state_tensor(std::vector<int> {3}, 12);
+    state["running_mean"] = make_state_tensor(std::vector<int> {3}, 12);
+    state["running_var"] = make_state_tensor(std::vector<int> {3}, 12);
 
     pnnx::Graph graph;
     std::string error = "stale";
@@ -2380,8 +2384,8 @@ static void test_weight_norm_lowering()
 {
     const pnnx::ExportedProgram program = make_weight_norm_program(true);
     std::map<std::string, pnnx::MaterializedExportedTensor> state;
-    state["weight_v"] = make_float_state_tensor(std::vector<int>{2, 3}, std::vector<float>{3.f, 4.f, 0.f, 0.f, 5.f, 12.f});
-    state["weight_g"] = make_float_state_tensor(std::vector<int>{2, 1}, std::vector<float>{10.f, 13.f});
+    state["weight_v"] = make_float_state_tensor(std::vector<int> {2, 3}, std::vector<float> {3.f, 4.f, 0.f, 0.f, 5.f, 12.f});
+    state["weight_g"] = make_float_state_tensor(std::vector<int> {2, 1}, std::vector<float> {10.f, 13.f});
 
     pnnx::Graph graph;
     std::string error = "stale";
@@ -2697,7 +2701,7 @@ static void test_string_and_memory_format_argument_lowering()
         const int pnnx_values[] = {0, 2, 3, 1};
         for (size_t i = 0; i < sizeof(exported_values) / sizeof(exported_values[0]); i++)
         {
-            const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument>{make_keyword_input("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, exported_values[i]))});
+            const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument> {make_keyword_input("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, exported_values[i]))});
             pnnx::Graph graph;
             std::string error;
             const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2717,7 +2721,7 @@ static void test_string_and_memory_format_argument_lowering()
     }
 
     {
-        const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.gelu.default", "gelu", std::vector<pnnx::ExportedNamedArgument>{make_keyword_input("approximate", make_string("tanh"))});
+        const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.gelu.default", "gelu", std::vector<pnnx::ExportedNamedArgument> {make_keyword_input("approximate", make_string("tanh"))});
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2748,10 +2752,11 @@ static void test_scalar_type_argument_lowering()
     for (size_t i = 0; i < sizeof(exported_values) / sizeof(exported_values[0]); i++)
     {
         const pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.softmax.int", "softmax",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_input("dim", make_int(1)),
-                make_keyword_input("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, exported_values[i]))});
+                "torch.ops.aten.softmax.int", "softmax",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_input("dim", make_int(1)),
+            make_keyword_input("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, exported_values[i]))
+        });
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2777,10 +2782,11 @@ static void test_scalar_type_argument_lowering()
     for (size_t i = 0; i < sizeof(unsupported_values) / sizeof(unsupported_values[0]); i++)
     {
         const pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.softmax.int", "softmax",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_input("dim", make_int(1)),
-                make_keyword_input("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, unsupported_values[i]))});
+                "torch.ops.aten.softmax.int", "softmax",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_input("dim", make_int(1)),
+            make_keyword_input("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, unsupported_values[i]))
+        });
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2810,9 +2816,10 @@ static void test_device_argument_lowering()
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
     {
         const pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.ones_like.default", "ones_like",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_keyword_input("device", make_device(cases[i].type, cases[i].index, cases[i].has_index))});
+                "torch.ops.aten.ones_like.default", "ones_like",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_keyword_input("device", make_device(cases[i].type, cases[i].index, cases[i].has_index))
+        });
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2843,9 +2850,10 @@ static void test_device_argument_lowering()
     for (size_t i = 0; i < sizeof(unsupported_cases) / sizeof(unsupported_cases[0]); i++)
     {
         const pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.ones_like.default", "ones_like",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_keyword_input("device", make_device(unsupported_cases[i].type, unsupported_cases[i].index, unsupported_cases[i].has_index))});
+                "torch.ops.aten.ones_like.default", "ones_like",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_keyword_input("device", make_device(unsupported_cases[i].type, unsupported_cases[i].index, unsupported_cases[i].has_index))
+        });
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2860,9 +2868,10 @@ static void test_layout_argument_lowering()
 {
     {
         const pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.ones_like.default", "ones_like",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_keyword_input("layout", make_enum(pnnx::EXPORTED_ARGUMENT_LAYOUT, 7))});
+                "torch.ops.aten.ones_like.default", "ones_like",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_keyword_input("layout", make_enum(pnnx::EXPORTED_ARGUMENT_LAYOUT, 7))
+        });
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2888,9 +2897,10 @@ static void test_layout_argument_lowering()
     for (size_t i = 0; i < sizeof(unsupported_values) / sizeof(unsupported_values[0]); i++)
     {
         const pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.ones_like.default", "ones_like",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_keyword_input("layout", make_enum(pnnx::EXPORTED_ARGUMENT_LAYOUT, unsupported_values[i]))});
+                "torch.ops.aten.ones_like.default", "ones_like",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_keyword_input("layout", make_enum(pnnx::EXPORTED_ARGUMENT_LAYOUT, unsupported_values[i]))
+        });
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
@@ -2905,10 +2915,11 @@ static void test_float_list_argument_lowering()
 {
     {
         pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.upsample_nearest2d.vec", "upsample_nearest2d",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_input("output_size", pnnx::ExportedArgument()),
-                make_input("scale_factors", make_floats(std::vector<double>{2.0, 2.976744}))});
+                                            "torch.ops.aten.upsample_nearest2d.vec", "upsample_nearest2d",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_input("output_size", pnnx::ExportedArgument()),
+            make_input("scale_factors", make_floats(std::vector<double>{2.0, 2.976744}))
+        });
         program.graph.nodes[0].inputs[0].name = "input";
         pnnx::Graph graph;
         std::string error;
@@ -2935,10 +2946,11 @@ static void test_float_list_argument_lowering()
 
     {
         pnnx::ExportedProgram program = make_unary_program(
-            "torch.ops.aten.upsample_nearest2d.vec", "upsample_nearest2d",
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_input("output_size", pnnx::ExportedArgument()),
-                make_input("scale_factors", make_floats(std::vector<double>()))});
+                                            "torch.ops.aten.upsample_nearest2d.vec", "upsample_nearest2d",
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_input("output_size", pnnx::ExportedArgument()),
+            make_input("scale_factors", make_floats(std::vector<double>()))
+        });
         program.graph.nodes[0].inputs[0].name = "input";
         pnnx::Graph graph;
         std::string error;
@@ -2990,10 +3002,11 @@ static void test_nearest_exact_vec_size_lowering()
     {
         const NearestExactCase& c = cases[i];
         pnnx::ExportedProgram program = make_unary_program(
-            c.target, c.output_name,
-            std::vector<pnnx::ExportedNamedArgument>{
-                make_input("output_size", make_ints(c.output_size)),
-                make_input("scale_factors", pnnx::ExportedArgument())});
+                                            c.target, c.output_name,
+        std::vector<pnnx::ExportedNamedArgument> {
+            make_input("output_size", make_ints(c.output_size)),
+            make_input("scale_factors", pnnx::ExportedArgument())
+        });
         program.graph.nodes[0].inputs[0].name = "input";
 
         pnnx::Graph graph;
@@ -3415,7 +3428,7 @@ static void test_reject_invalid_graph_definitions()
     }
 
     {
-        pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument>{make_keyword_input("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, 99))});
+        pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument> {make_keyword_input("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, 99))});
         expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unsupported non-tensor argument memory_format", "unknown memory format");
     }
 
@@ -3431,7 +3444,7 @@ static void test_reject_signature_graph_mismatch()
     {
         pnnx::ExportedProgram program = make_linear_relu_program();
         program.graph.inputs[2] = make_tensor("y");
-        program.graph.tensor_values["y"] = make_tensor_meta(std::vector<int64_t>{2, 4});
+        program.graph.tensor_values["y"] = make_tensor_meta(std::vector<int64_t> {2, 4});
         expect_lower_error(program, make_linear_state(), "input spec 2 tensor x does not match graph input y", "input signature mismatch");
     }
 
@@ -3454,7 +3467,7 @@ static void test_reject_state_metadata_mismatch()
     {
         pnnx::ExportedProgram program = make_linear_relu_program();
         std::map<std::string, pnnx::MaterializedExportedTensor> state = make_linear_state();
-        state["linear.weight"].shape = std::vector<int>{4, 3};
+        state["linear.weight"].shape = std::vector<int> {4, 3};
         expect_lower_error(program, state, "parameter linear.weight shape does not match tensor metadata", "state shape mismatch");
     }
 
@@ -3487,7 +3500,7 @@ static void test_generated_names_do_not_collide()
         program.graph.tensor_values.erase("x");
 
         std::map<std::string, pnnx::MaterializedExportedTensor> state;
-        state["linear.weight"] = make_state_tensor(std::vector<int>{3, 4}, 48);
+        state["linear.weight"] = make_state_tensor(std::vector<int> {3, 4}, 48);
         pnnx::Graph graph;
         std::string error;
         const int result = pnnx::lower_exported_program(program, state, graph, error);

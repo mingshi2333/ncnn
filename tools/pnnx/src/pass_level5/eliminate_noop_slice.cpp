@@ -26,7 +26,7 @@ void eliminate_noop_slice(Graph& graph)
                 continue;
 
             if (!op->inputs[0]->shape.empty() && op->inputs[0]->shape == op->outputs[0]->shape
-                && std::find(op->inputs[0]->shape.begin(), op->inputs[0]->shape.end(), -1) == op->inputs[0]->shape.end())
+                    && std::find(op->inputs[0]->shape.begin(), op->inputs[0]->shape.end(), -1) == op->inputs[0]->shape.end())
             {
                 matched = true;
             }

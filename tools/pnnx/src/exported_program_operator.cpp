@@ -506,11 +506,11 @@ static bool custom_argument_type_matches(ExportedCustomArgumentType expected, Ex
 }
 
 static int canonicalize_with_custom_schema(const ExportedNode& node,
-                                           const ExportedProgramHeader& header,
-                                           const ExportedCustomArgument* schema_arguments,
-                                           size_t schema_argument_count,
-                                           std::vector<CanonicalExportedArgument>& result,
-                                           std::string& error)
+        const ExportedProgramHeader& header,
+        const ExportedCustomArgument* schema_arguments,
+        size_t schema_argument_count,
+        std::vector<CanonicalExportedArgument>& result,
+        std::string& error)
 {
     std::map<std::string, size_t> schema_indices;
     for (size_t i = 0; i < schema_argument_count; i++)

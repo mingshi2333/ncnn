@@ -238,9 +238,9 @@ static bool is_runtime_assert_node(const ExportedNode& node)
 static size_t symbolic_argument_reference_count(const ExportedArgument& argument, const std::string& name)
 {
     if ((argument.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
-         || argument.type == EXPORTED_ARGUMENT_SYMBOLIC_FLOAT
-         || argument.type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL)
-        && argument.name == name)
+            || argument.type == EXPORTED_ARGUMENT_SYMBOLIC_FLOAT
+            || argument.type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL)
+            && argument.name == name)
         return 1;
 
     if (argument.type != EXPORTED_ARGUMENT_SYMBOLIC_INT_LIST)

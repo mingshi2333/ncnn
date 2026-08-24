@@ -1074,8 +1074,7 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
     {
         if (read_nonnegative_integer(payload, argument.enum_value, tag_path, "enum value must be non-negative", error) != 0)
             return -1;
-        argument.type = tag == "as_scalar_type" ? EXPORTED_ARGUMENT_SCALAR_TYPE : tag == "as_memory_format" ? EXPORTED_ARGUMENT_MEMORY_FORMAT
-                                                                                                            : EXPORTED_ARGUMENT_LAYOUT;
+        argument.type = tag == "as_scalar_type" ? EXPORTED_ARGUMENT_SCALAR_TYPE : tag == "as_memory_format" ? EXPORTED_ARGUMENT_MEMORY_FORMAT : EXPORTED_ARGUMENT_LAYOUT;
         return 0;
     }
     if (tag == "as_device")
@@ -1109,16 +1108,13 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
     }
     if (tag == "as_sym_int" || tag == "as_sym_float" || tag == "as_sym_bool")
     {
-        const std::string static_tag = tag == "as_sym_int" ? "as_int" : tag == "as_sym_float" ? "as_float"
-                                                                                              : "as_bool";
-        const JsonType static_type = tag == "as_sym_int" ? JSON_INT64 : tag == "as_sym_float" ? JSON_DOUBLE
-                                                                                              : JSON_BOOL;
+        const std::string static_tag = tag == "as_sym_int" ? "as_int" : tag == "as_sym_float" ? "as_float" : "as_bool";
+        const JsonType static_type = tag == "as_sym_int" ? JSON_INT64 : tag == "as_sym_float" ? JSON_DOUBLE : JSON_BOOL;
         if (read_static_sym_argument(payload, static_tag, "as_name", static_type, argument, tag_path, error) != 0)
             return -1;
         if (argument.type == EXPORTED_ARGUMENT_UNSUPPORTED)
         {
-            argument.type = tag == "as_sym_int" ? EXPORTED_ARGUMENT_SYMBOLIC_INT : tag == "as_sym_float" ? EXPORTED_ARGUMENT_SYMBOLIC_FLOAT
-                                                                                                         : EXPORTED_ARGUMENT_SYMBOLIC_BOOL;
+            argument.type = tag == "as_sym_int" ? EXPORTED_ARGUMENT_SYMBOLIC_INT : tag == "as_sym_float" ? EXPORTED_ARGUMENT_SYMBOLIC_FLOAT : EXPORTED_ARGUMENT_SYMBOLIC_BOOL;
             return 0;
         }
 
@@ -1721,8 +1717,7 @@ static int parse_input_spec(const JsonValue& value, ExportedInputSpec& spec, con
         if (read_tensor_argument(*argument, spec.arg.name, tag_path + ".arg", error) != 0)
             return -1;
 
-        const std::string target_field = tag == "parameter" ? "parameter_name" : tag == "buffer" ? "buffer_name"
-                                                                                                 : "tensor_constant_name";
+        const std::string target_field = tag == "parameter" ? "parameter_name" : tag == "buffer" ? "buffer_name" : "tensor_constant_name";
         if (read_nonempty_string_field(payload, target_field, spec.target, tag_path, error) != 0)
             return -1;
 

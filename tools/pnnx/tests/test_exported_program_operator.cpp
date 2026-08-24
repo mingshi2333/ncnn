@@ -278,7 +278,7 @@ static void test_non_dispatch_scalar_arguments()
     };
     const pnnx::ExportedNode node = make_node("torch.ops.aten.sub.int", inputs);
     expect_canonical(node,
-                     std::vector<pnnx::CanonicalExportedArgument>{make_expected("a", make_symbolic_int("size")), make_expected("b", make_int(1))},
+                     std::vector<pnnx::CanonicalExportedArgument> {make_expected("a", make_symbolic_int("size")), make_expected("b", make_int(1))},
                      "non-dispatch scalar sub");
 
     std::vector<pnnx::ExportedNamedArgument> invalid_inputs = inputs;
@@ -364,61 +364,71 @@ static void test_default_arguments()
     const pnnx::ExportedArgument weight = make_tensor("p_weight");
 
     expect_canonical(
-        make_node("torch.ops.aten.linear.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                       make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                       make_input("weight", weight, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("input", x), make_expected("weight", weight), make_expected("bias", make_none())}, "linear defaults");
+    make_node("torch.ops.aten.linear.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("weight", weight, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("input", x), make_expected("weight", weight), make_expected("bias", make_none())}, "linear defaults");
 
     expect_canonical(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("other", x), make_expected("alpha", make_int(1))}, "add defaults");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("other", x), make_expected("alpha", make_int(1))}, "add defaults");
 
     expect_canonical(
-        make_node("torch.ops.aten.flatten.using_ints", std::vector<pnnx::ExportedNamedArgument>{
-                                                           make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("start_dim", make_int(0)), make_expected("end_dim", make_int(-1))}, "flatten defaults");
+    make_node("torch.ops.aten.flatten.using_ints", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("start_dim", make_int(0)), make_expected("end_dim", make_int(-1))}, "flatten defaults");
 
     expect_canonical(
-        make_node("torch.ops.aten.conv2d.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                       make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                       make_input("weight", weight, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("input", x), make_expected("weight", weight), make_expected("bias", make_none()), make_expected("stride", make_ints(std::vector<int64_t>{1, 1})), make_expected("padding", make_ints(std::vector<int64_t>{0, 0})), make_expected("dilation", make_ints(std::vector<int64_t>{1, 1})), make_expected("groups", make_int(1))}, "conv2d defaults");
+    make_node("torch.ops.aten.conv2d.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("weight", weight, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("input", x), make_expected("weight", weight), make_expected("bias", make_none()), make_expected("stride", make_ints(std::vector<int64_t>{1, 1})), make_expected("padding", make_ints(std::vector<int64_t>{0, 0})), make_expected("dilation", make_ints(std::vector<int64_t>{1, 1})), make_expected("groups", make_int(1))}, "conv2d defaults");
 
     expect_canonical(
-        make_node("torch.ops.aten.isclose.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("other", x), make_expected("rtol", make_float(1.0000000000000001e-05)), make_expected("atol", make_float(1e-08)), make_expected("equal_nan", make_bool(false))}, "float bool defaults");
+    make_node("torch.ops.aten.isclose.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("other", x), make_expected("rtol", make_float(1.0000000000000001e-05)), make_expected("atol", make_float(1e-08)), make_expected("equal_nan", make_bool(false))}, "float bool defaults");
 
     expect_canonical(
-        make_node("torch.ops.aten.gelu.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                     make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("approximate", make_string("none"))}, "string defaults");
+    make_node("torch.ops.aten.gelu.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("approximate", make_string("none"))}, "string defaults");
 
     expect_canonical(
-        make_node("torch.ops.aten.sub.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("other", make_complex(0.0, 4.0), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("other", make_complex(0.0, 4.0)), make_expected("alpha", make_int(1))}, "complex scalar");
+    make_node("torch.ops.aten.sub.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("other", make_complex(0.0, 4.0), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("other", make_complex(0.0, 4.0)), make_expected("alpha", make_int(1))}, "complex scalar");
 
     expect_canonical(
-        make_node("torch.ops.aten.max_pool2d.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                           make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                           make_input("kernel_size", make_ints(std::vector<int64_t>{2, 2}), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("kernel_size", make_ints(std::vector<int64_t>{2, 2})), make_expected("stride", make_ints(std::vector<int64_t>())), make_expected("padding", make_ints(std::vector<int64_t>{0, 0})), make_expected("dilation", make_ints(std::vector<int64_t>{1, 1})), make_expected("ceil_mode", make_bool(false))}, "empty list defaults");
+    make_node("torch.ops.aten.max_pool2d.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("kernel_size", make_ints(std::vector<int64_t>{2, 2}), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("kernel_size", make_ints(std::vector<int64_t>{2, 2})), make_expected("stride", make_ints(std::vector<int64_t>())), make_expected("padding", make_ints(std::vector<int64_t>{0, 0})), make_expected("dilation", make_ints(std::vector<int64_t>{1, 1})), make_expected("ceil_mode", make_bool(false))}, "empty list defaults");
 
     expect_canonical(
-        make_node("torch.ops.aten.triu_indices.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                             make_input("row", make_int(3), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                             make_input("col", make_int(4), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("row", make_int(3)), make_expected("col", make_int(4)), make_expected("offset", make_int(0)), make_expected("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, 5)), make_expected("layout", make_none()), make_expected("device", make_none()), make_expected("pin_memory", make_none())}, "scalar type default");
+    make_node("torch.ops.aten.triu_indices.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("row", make_int(3), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("col", make_int(4), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("row", make_int(3)), make_expected("col", make_int(4)), make_expected("offset", make_int(0)), make_expected("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, 5)), make_expected("layout", make_none()), make_expected("device", make_none()), make_expected("pin_memory", make_none())}, "scalar type default");
 
     expect_canonical(
-        make_node("torch.ops.aten.contiguous.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                           make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, 1))}, "memory format default");
+    make_node("torch.ops.aten.contiguous.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, 1))}, "memory format default");
 }
 
 static void test_binding_order_and_legacy_kind()
@@ -427,29 +437,33 @@ static void test_binding_order_and_legacy_kind()
     const pnnx::ExportedArgument weight = make_tensor("p_weight");
 
     expect_canonical(
-        make_node("torch.ops.aten.linear.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                       make_input("weight", weight, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD),
-                                                       make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("input", x), make_expected("weight", weight), make_expected("bias", make_none())}, "keyword reorder");
+    make_node("torch.ops.aten.linear.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("weight", weight, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD),
+        make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("input", x), make_expected("weight", weight), make_expected("bias", make_none())}, "keyword reorder");
 
     expect_canonical(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_MISSING),
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_MISSING)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("other", x), make_expected("alpha", make_int(1))}, "legacy missing kind");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_MISSING),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_MISSING)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("other", x), make_expected("alpha", make_int(1))}, "legacy missing kind");
 
     expect_canonical(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("alpha", make_int(3), pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("other", x), make_expected("alpha", make_int(3))}, "explicit keyword");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("alpha", make_int(3), pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("other", x), make_expected("alpha", make_int(3))}, "explicit keyword");
 
     expect_canonical(
-        make_node("torch.ops.aten.flatten.using_ints", std::vector<pnnx::ExportedNamedArgument>{
-                                                           make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                           make_input("end_dim", make_int(-2), pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)}),
-        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("start_dim", make_int(0)), make_expected("end_dim", make_int(-2))}, "skip default before keyword");
+    make_node("torch.ops.aten.flatten.using_ints", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("end_dim", make_int(-2), pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)
+    }),
+    std::vector<pnnx::CanonicalExportedArgument> {make_expected("self", x), make_expected("start_dim", make_int(0)), make_expected("end_dim", make_int(-2))}, "skip default before keyword");
 }
 
 static void test_binding_errors()
@@ -457,62 +471,71 @@ static void test_binding_errors()
     const pnnx::ExportedArgument x = make_tensor("x");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "duplicate argument self", "duplicate argument");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "duplicate argument self", "duplicate argument");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("unknown", x, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)}),
-        make_header(), "unknown argument unknown", "unknown argument");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("unknown", x, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD)
+    }),
+    make_header(), "unknown argument unknown", "unknown argument");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_UNKNOWN),
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "unknown argument kind", "unknown kind");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_UNKNOWN),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "unknown argument kind", "unknown kind");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD),
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "positional argument self follows a keyword", "positional after keyword");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD),
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "positional argument self follows a keyword", "positional after keyword");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("alpha", make_int(2), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "keyword-only argument alpha", "keyword only positional");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("alpha", make_int(2), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "keyword-only argument alpha", "keyword only positional");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "expected positional argument self", "positional order");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "expected positional argument self", "positional order");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.linear.default", std::vector<pnnx::ExportedNamedArgument>{
-                                                       make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "missing required argument weight", "missing required");
+    make_node("torch.ops.aten.linear.default", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("input", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "missing required argument weight", "missing required");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_MISSING),
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "mixes legacy and explicit argument kinds", "mixed kind versions");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_MISSING),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "mixes legacy and explicit argument kinds", "mixed kind versions");
 
     expect_canonical_error(
-        make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", make_unsupported("as_int_lists"), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                   make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "unsupported serialized argument as_int_lists", "unsupported argument");
+    make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument> {
+        make_input("self", make_unsupported("as_int_lists"), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)
+    }),
+    make_header(), "unsupported serialized argument as_int_lists", "unsupported argument");
 
     expect_canonical_error(make_node("torch.ops.aten.no_such_operator.default", std::vector<pnnx::ExportedNamedArgument>()), make_header(), "cannot resolve dispatcher schema", "missing dispatcher schema");
-    expect_canonical_error(make_node("torch.ops.aten.relu.default", std::vector<pnnx::ExportedNamedArgument>{make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}), make_header(-1), "missing aten opset", "missing aten opset");
-    expect_canonical_error(make_node("torch.ops.aten.relu.default", std::vector<pnnx::ExportedNamedArgument>{make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}), make_header(9), "does not match linked libtorch", "opset mismatch");
+    expect_canonical_error(make_node("torch.ops.aten.relu.default", std::vector<pnnx::ExportedNamedArgument> {make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}), make_header(-1), "missing aten opset", "missing aten opset");
+    expect_canonical_error(make_node("torch.ops.aten.relu.default", std::vector<pnnx::ExportedNamedArgument> {make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}), make_header(9), "does not match linked libtorch", "opset mismatch");
 }
 
 static std::string join_ints(const std::vector<int64_t>& values)
