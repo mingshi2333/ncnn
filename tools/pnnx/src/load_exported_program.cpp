@@ -249,6 +249,15 @@ static int exported_scalar_type_to_pnnx(int64_t value, int& converted)
     return 0;
 }
 
+static int exported_layout_to_pnnx(int64_t value, int& converted)
+{
+    if (value != 7) // strided
+        return -1;
+
+    converted = 0;
+    return 0;
+}
+
 static int exported_argument_to_parameter(const ExportedArgument& argument, Parameter& parameter)
 {
     if (argument.type == EXPORTED_ARGUMENT_NONE)
@@ -309,6 +318,12 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
             device << argument.device_value.type << ':' << argument.device_value.index;
             parameter.s = device.str();
         }
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_LAYOUT)
+    {
+        parameter.type = 2;
+        if (exported_layout_to_pnnx(argument.enum_value, parameter.i) != 0)
+            return -1;
     }
     else
         return -1;

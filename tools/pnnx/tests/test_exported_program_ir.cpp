@@ -1192,6 +1192,51 @@ static void test_device_argument_lowering()
     }
 }
 
+static void test_layout_argument_lowering()
+{
+    {
+        const pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.ones_like.default", "ones_like",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_keyword_input("layout", make_enum(pnnx::EXPORTED_ARGUMENT_LAYOUT, 7))});
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "layout argument", error);
+        if (result == 0)
+        {
+            pnnx::Operator* ones_like = find_operator(graph, "aten::ones_like");
+            check(ones_like && ones_like->inputnames == std::vector<std::string>({"self", "dtype", "layout", "device", "pin_memory", "memory_format"}), "layout argument", "ones_like input names are not canonical");
+            check(ones_like && ones_like->inputs.size() == 6 && ones_like->inputs[2]->producer && ones_like->inputs[2]->producer->has_param("value"), "layout argument", "layout constant is missing");
+            if (ones_like && ones_like->inputs.size() == 6 && ones_like->inputs[2]->producer && ones_like->inputs[2]->producer->has_param("value"))
+            {
+                const pnnx::Parameter& layout = ones_like->inputs[2]->producer->params.at("value");
+                check(layout.type == 2 && layout.i == 0, "layout argument", "strided layout was not converted to the pnnx/JIT enum value");
+            }
+
+            pnnx::pass_level2(graph);
+            check(count_operator(graph, "aten::ones_like") == 0 && count_operator(graph, "torch.ones_like") == 1, "layout argument pass level2", "ones_like did not consume the layout constant");
+        }
+    }
+
+    const int64_t unsupported_values[] = {0, 1, 2, 3, 4, 5, 6, 8, INT64_MAX};
+    for (size_t i = 0; i < sizeof(unsupported_values) / sizeof(unsupported_values[0]); i++)
+    {
+        const pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.ones_like.default", "ones_like",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_keyword_input("layout", make_enum(pnnx::EXPORTED_ARGUMENT_LAYOUT, unsupported_values[i]))});
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result != 0, "layout argument rejection", "unsupported layout unexpectedly lowered");
+        check(error.find("unsupported non-tensor argument layout") != std::string::npos, "layout argument rejection", "wrong error " + error);
+        check(graph.ops.empty() && graph.operands.empty(), "layout argument rejection", "failed lowering mutated the destination graph");
+    }
+}
+
 static void test_alias_elimination()
 {
     {
@@ -1599,6 +1644,7 @@ int main(int argc, char** argv)
     test_string_and_memory_format_argument_lowering();
     test_scalar_type_argument_lowering();
     test_device_argument_lowering();
+    test_layout_argument_lowering();
     test_alias_elimination();
     test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();
