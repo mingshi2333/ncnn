@@ -51,6 +51,13 @@ static pnnx::ExportedNamedArgument make_input(const std::string& name, const pnn
     return input;
 }
 
+static pnnx::ExportedNamedArgument make_keyword_input(const std::string& name, const pnnx::ExportedArgument& value)
+{
+    pnnx::ExportedNamedArgument input = make_input(name, value);
+    input.kind = pnnx::EXPORTED_ARGUMENT_KIND_KEYWORD;
+    return input;
+}
+
 static pnnx::ExportedArgument make_bool(bool value)
 {
     pnnx::ExportedArgument argument;
@@ -80,6 +87,22 @@ static pnnx::ExportedArgument make_ints(const std::vector<int64_t>& values)
     pnnx::ExportedArgument argument;
     argument.type = pnnx::EXPORTED_ARGUMENT_INT_LIST;
     argument.int_values = values;
+    return argument;
+}
+
+static pnnx::ExportedArgument make_string(const std::string& value)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_STRING;
+    argument.string_value = value;
+    return argument;
+}
+
+static pnnx::ExportedArgument make_enum(pnnx::ExportedArgumentType type, int64_t value)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = type;
+    argument.enum_value = value;
     return argument;
 }
 
@@ -516,6 +539,40 @@ static pnnx::ExportedProgram make_cat_program()
     return program;
 }
 
+static pnnx::ExportedProgram make_unary_program(const std::string& target, const std::string& output_name, const std::vector<pnnx::ExportedNamedArgument>& arguments)
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode node;
+    node.name = output_name;
+    node.has_name = true;
+    node.target = target;
+    node.inputs.push_back(make_input("self", make_tensor("x")));
+    node.inputs.insert(node.inputs.end(), arguments.begin(), arguments.end());
+    node.outputs.push_back(make_tensor(output_name));
+    program.graph.nodes.push_back(node);
+    program.graph.outputs.push_back(make_tensor(output_name));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+    program.graph.tensor_values[output_name] = make_tensor_meta(std::vector<int64_t>{1, 3, 4, 4});
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor(output_name);
+    program.output_specs.push_back(output);
+    return program;
+}
+
 static pnnx::Operator* find_operator(pnnx::Graph& graph, const std::string& type)
 {
     for (size_t i = 0; i < graph.ops.size(); i++)
@@ -866,6 +923,79 @@ static void test_tensor_list_argument_lowering()
     check(count_operator(graph, "aten::cat") == 0 && count_operator(graph, "torch.cat") == 1, "tensor list pass level2", "cat was not canonicalized");
 }
 
+static void test_string_and_memory_format_argument_lowering()
+{
+    {
+        const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument>());
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "memory format argument", error);
+        if (result == 0)
+        {
+            pnnx::Operator* contiguous = find_operator(graph, "aten::contiguous");
+            check(contiguous && contiguous->inputnames == std::vector<std::string>({"self", "memory_format"}), "memory format argument", "contiguous input names are not canonical");
+            check(contiguous && contiguous->inputs.size() == 2 && contiguous->inputs[1]->producer && contiguous->inputs[1]->producer->has_param("value"), "memory format argument", "memory format constant is missing");
+            if (contiguous && contiguous->inputs.size() == 2 && contiguous->inputs[1]->producer && contiguous->inputs[1]->producer->has_param("value"))
+            {
+                const pnnx::Parameter& memory_format = contiguous->inputs[1]->producer->params.at("value");
+                check(memory_format.type == 2 && memory_format.i == 0, "memory format argument", "contiguous format was not converted to the pnnx/JIT enum value");
+            }
+
+            pnnx::pass_level2(graph);
+            check(count_operator(graph, "aten::contiguous") == 0, "memory format pass level2", "contiguous was not eliminated");
+        }
+    }
+
+    {
+        const int64_t exported_values[] = {1, 2, 3, 4};
+        const int pnnx_values[] = {0, 2, 3, 1};
+        for (size_t i = 0; i < sizeof(exported_values) / sizeof(exported_values[0]); i++)
+        {
+            const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument>{make_keyword_input("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, exported_values[i]))});
+            pnnx::Graph graph;
+            std::string error;
+            const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+            check(result == 0, "memory format enum mapping", error);
+            if (result == 0)
+            {
+                pnnx::Operator* contiguous = find_operator(graph, "aten::contiguous");
+                check(contiguous && contiguous->inputs.size() == 2 && contiguous->inputs[1]->producer && contiguous->inputs[1]->producer->has_param("value"), "memory format enum mapping", "memory format constant is missing");
+                if (contiguous && contiguous->inputs.size() == 2 && contiguous->inputs[1]->producer && contiguous->inputs[1]->producer->has_param("value"))
+                {
+                    const pnnx::Parameter& memory_format = contiguous->inputs[1]->producer->params.at("value");
+                    check(memory_format.type == 2 && memory_format.i == pnnx_values[i], "memory format enum mapping", "memory format enum value is wrong");
+                }
+            }
+        }
+    }
+
+    {
+        const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.gelu.default", "gelu", std::vector<pnnx::ExportedNamedArgument>{make_keyword_input("approximate", make_string("tanh"))});
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "string argument", error);
+        if (result == 0)
+        {
+            pnnx::Operator* gelu = find_operator(graph, "aten::gelu");
+            check(gelu && gelu->inputs.size() == 2 && gelu->inputs[1]->producer && gelu->inputs[1]->producer->has_param("value"), "string argument", "gelu approximate constant is missing");
+            if (gelu && gelu->inputs.size() == 2 && gelu->inputs[1]->producer && gelu->inputs[1]->producer->has_param("value"))
+            {
+                const pnnx::Parameter& approximate = gelu->inputs[1]->producer->params.at("value");
+                check(approximate.type == 4 && approximate.s == "tanh", "string argument", "gelu approximate string is wrong");
+            }
+
+            pnnx::pass_level2(graph);
+            pnnx::Operator* functional_gelu = find_operator(graph, "F.gelu");
+            check(functional_gelu && functional_gelu->has_param("approximate") && functional_gelu->params.at("approximate").s == "tanh", "string pass level2", "gelu string was not preserved by the existing pass");
+        }
+    }
+}
+
 static void expect_lower_error(const pnnx::ExportedProgram& program,
                                const std::map<std::string, pnnx::MaterializedExportedTensor>& state,
                                const std::string& expected_error,
@@ -973,6 +1103,11 @@ static void test_reject_invalid_graph_definitions()
         pnnx::ExportedProgram program = make_cat_program();
         program.graph.nodes[0].inputs[0].arg.tensor_names[1] = "missing";
         expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unknown tensor value missing for tensor-list argument tensors", "unknown tensor-list member");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument>{make_keyword_input("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, 99))});
+        expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unsupported non-tensor argument memory_format", "unknown memory format");
     }
 }
 
@@ -1172,6 +1307,7 @@ int main(int argc, char** argv)
     test_flatten_dimensions();
     test_dispatcher_backed_target_lowering();
     test_tensor_list_argument_lowering();
+    test_string_and_memory_format_argument_lowering();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();
     test_reject_invalid_graph_definitions();

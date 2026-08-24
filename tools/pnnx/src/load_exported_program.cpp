@@ -221,6 +221,22 @@ static int exported_int_to_pnnx(int64_t value)
     return (int)value;
 }
 
+static int exported_memory_format_to_pnnx(int64_t value, int& converted)
+{
+    if (value == 1)
+        converted = 0; // contiguous
+    else if (value == 2)
+        converted = 2; // channels last
+    else if (value == 3)
+        converted = 3; // channels last 3d
+    else if (value == 4)
+        converted = 1; // preserve
+    else
+        return -1;
+
+    return 0;
+}
+
 static int exported_argument_to_parameter(const ExportedArgument& argument, Parameter& parameter)
 {
     if (argument.type == EXPORTED_ARGUMENT_NONE)
@@ -248,6 +264,17 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
     {
         parameter.type = 1;
         parameter.b = argument.bool_value;
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_STRING)
+    {
+        parameter.type = 4;
+        parameter.s = argument.string_value;
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_MEMORY_FORMAT)
+    {
+        parameter.type = 2;
+        if (exported_memory_format_to_pnnx(argument.enum_value, parameter.i) != 0)
+            return -1;
     }
     else
         return -1;
