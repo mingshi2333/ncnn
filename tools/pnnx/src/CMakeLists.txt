@@ -196,6 +196,7 @@ set(pnnx_pass_level2_SRCS
     pass_level2/Tensor_fill.cpp
     pass_level2/Tensor_index.cpp
     pass_level2/Tensor_index_put.cpp
+    pass_level2/Tensor_item.cpp
     pass_level2/Tensor_masked_fill.cpp
     pass_level2/Tensor_new_empty.cpp
     pass_level2/Tensor_new_full.cpp

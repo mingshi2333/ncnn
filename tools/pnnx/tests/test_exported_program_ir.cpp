@@ -6,6 +6,7 @@
 #include "pass_level2.h"
 #include "pass_level3/fuse_expression.h"
 #include "pass_level3/fuse_op1ton_unpack.h"
+#include "pass_level5/eliminate_noop_slice.h"
 #include "pt2_archive.h"
 
 #include <limits.h>
@@ -1836,6 +1837,10 @@ static void test_symbolic_scalar_lowering()
             check(item && item->type == 0 && item->shape.empty(), "symbolic scalar lower", "SymFloat was materialized as a tensor");
             check(condition_item && condition_item->type == 0 && condition_item->shape.empty(), "symbolic scalar lower", "SymBool was materialized as a tensor");
             check(arange && arange->shape == std::vector<int>({-1}), "symbolic scalar lower", "runtime-dependent output shape is not dynamic");
+
+            pnnx::pass_level2(graph);
+            check(count_operator(graph, "aten::item") == 0, "symbolic scalar level2", "raw aten::item operators were retained");
+            check(count_operator(graph, "Tensor.item") == 3, "symbolic scalar level2", "tensor item operators were not canonicalized");
         }
     }
 
@@ -3211,6 +3216,65 @@ static void test_alias_elimination()
     }
 }
 
+static void test_dynamic_slice_is_not_eliminated()
+{
+    {
+        pnnx::Graph graph;
+        pnnx::Operator* input = graph.new_operator("pnnx.Input", "input");
+        pnnx::Operand* x = graph.new_operand("x");
+        x->producer = input;
+        x->shape = std::vector<int>({3, 16, -1, 16});
+        input->outputs.push_back(x);
+
+        pnnx::Operator* slice = graph.new_operator("Tensor.slice", "slice");
+        slice->inputs.push_back(x);
+        x->consumers.push_back(slice);
+        slice->params["dim"] = 2;
+        slice->params["start"] = 1;
+        slice->params["end"] = INT_MAX;
+        slice->params["step"] = 1;
+        pnnx::Operand* y = graph.new_operand("y");
+        y->producer = slice;
+        y->shape = std::vector<int>({3, 16, -1, 16});
+        slice->outputs.push_back(y);
+
+        pnnx::Operator* output = graph.new_operator("pnnx.Output", "output");
+        output->inputs.push_back(y);
+        y->consumers.push_back(output);
+
+        pnnx::eliminate_noop_slice(graph);
+        check(count_operator(graph, "Tensor.slice") == 1, "dynamic noop slice", "slice with an unknown changed dimension was eliminated");
+    }
+
+    {
+        pnnx::Graph graph;
+        pnnx::Operator* input = graph.new_operator("pnnx.Input", "input");
+        pnnx::Operand* x = graph.new_operand("x");
+        x->producer = input;
+        x->shape = std::vector<int>({3, 16, 16, 16});
+        input->outputs.push_back(x);
+
+        pnnx::Operator* slice = graph.new_operator("Tensor.slice", "slice");
+        slice->inputs.push_back(x);
+        x->consumers.push_back(slice);
+        slice->params["dim"] = 2;
+        slice->params["start"] = 0;
+        slice->params["end"] = 16;
+        slice->params["step"] = 1;
+        pnnx::Operand* y = graph.new_operand("y");
+        y->producer = slice;
+        y->shape = std::vector<int>({3, 16, 16, 16});
+        slice->outputs.push_back(y);
+
+        pnnx::Operator* output = graph.new_operator("pnnx.Output", "output");
+        output->inputs.push_back(y);
+        y->consumers.push_back(output);
+
+        pnnx::eliminate_noop_slice(graph);
+        check(count_operator(graph, "Tensor.slice") == 0, "static noop slice", "proven static no-op slice was retained");
+    }
+}
+
 static void test_lift_fresh_copy_lowering()
 {
     const pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.lift_fresh_copy.default", "lift_fresh_copy", std::vector<pnnx::ExportedNamedArgument>());
@@ -3583,6 +3647,7 @@ int main(int argc, char** argv)
     test_avg_pool_empty_stride_normalization();
     test_max_pool_empty_stride_normalization();
     test_alias_elimination();
+    test_dynamic_slice_is_not_eliminated();
     test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();

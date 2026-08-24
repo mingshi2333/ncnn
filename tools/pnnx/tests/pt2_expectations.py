@@ -384,7 +384,7 @@ PT2_EXPECTATIONS = {
     "test_transformers_electra_attention": (PASS, ""),
     "test_transformers_flaubert_attention": (PASS, ""),
     "test_transformers_fsmt_attention": (PASS, ""),
-    "test_transformers_funnel_attention": (PNNX_LOWERING_UNSUPPORTED, "SyntaxError: invalid syntax"),
+    "test_transformers_funnel_attention": (PASS, ""),
     "test_transformers_gpt2_attention": (PASS, ""),
     "test_transformers_layoutlm_attention": (PASS, ""),
     "test_transformers_longformer_attention": (PASS, ""),
