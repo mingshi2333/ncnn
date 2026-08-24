@@ -683,8 +683,8 @@ static void test_graph_arguments()
     if (parse_argument_case("{\"as_optional_tensors\":[]}", ",\"kind\":1", argument, kind, "argument optional tensor list"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_optional_tensors", "argument optional tensor list", "optional tensor list classification changed");
 
-    if (parse_argument_case("{\"as_complex\":{\"real\":1.0,\"imag\":2.0}}", ",\"kind\":1", argument, kind, "argument complex"))
-        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_complex", "argument complex", "complex classification changed");
+    if (parse_argument_case("{\"as_complex\":{\"real\":1.0,\"imag\":-2.0}}", ",\"kind\":1", argument, kind, "argument complex"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_COMPLEX && argument.complex_real_value == 1.0 && argument.complex_imag_value == -2.0, "argument complex", "complex value changed");
 
     if (parse_argument_case("{\"as_nested_tensors\":[]}", ",\"kind\":1", argument, kind, "argument nested tensors"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_nested_tensors", "argument nested tensors", "nested tensors classification changed");
@@ -713,6 +713,22 @@ static void test_graph_arguments()
     fixture = ProgramFixture();
     fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_float\":\"infinity\"},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
     expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_float", "unknown special float value", "argument invalid special float");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_complex\":{\"imag\":2.0}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_complex.real", "missing required field", "argument complex missing real");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_complex\":{\"real\":1.0}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_complex.imag", "missing required field", "argument complex missing imag");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_complex\":{\"real\":1,\"imag\":2.0}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_complex.real", "expected float", "argument complex real type");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_complex\":{\"real\":1.0,\"imag\":false}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_complex.imag", "expected float", "argument complex imag type");
 
     fixture = ProgramFixture();
     fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_int\":1},\"kind\":3}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";

@@ -9,6 +9,7 @@
 
 #include <limits.h>
 
+#include <complex>
 #include <limits>
 #include <map>
 #include <set>
@@ -360,6 +361,11 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
         parameter.af.reserve(argument.float_values.size());
         for (size_t i = 0; i < argument.float_values.size(); i++)
             parameter.af.push_back((float)argument.float_values[i]);
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_COMPLEX)
+    {
+        parameter.type = 10;
+        parameter.c = std::complex<float>((float)argument.complex_real_value, (float)argument.complex_imag_value);
     }
     else if (argument.type == EXPORTED_ARGUMENT_BOOL)
     {

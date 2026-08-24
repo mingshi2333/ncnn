@@ -325,7 +325,7 @@ PT2_EXPECTATIONS = {
     "test_torch_mm": (PASS, ""),
     "test_torch_mv": (PASS, ""),
     "test_convnext_tiny": (PASS, ""),
-    "test_ir_complex": (PT2_FRONTEND_UNSUPPORTED, "torch 2.12.1+cu126 aten opset 10 target torch.ops.aten.sub.Tensor: unsupported serialized argument as_complex for other"),
+    "test_ir_complex": (PASS, ""),
     "test_mobilenet_v2": (PASS, ""),
     "test_mobilenet_v3_small": (PASS, ""),
     "test_pnnx_eliminate_noop_cat": (PASS, ""),

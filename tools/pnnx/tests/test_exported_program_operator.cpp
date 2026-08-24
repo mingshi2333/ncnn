@@ -73,6 +73,15 @@ static pnnx::ExportedArgument make_float(double number)
     return value;
 }
 
+static pnnx::ExportedArgument make_complex(double real, double imag)
+{
+    pnnx::ExportedArgument value;
+    value.type = pnnx::EXPORTED_ARGUMENT_COMPLEX;
+    value.complex_real_value = real;
+    value.complex_imag_value = imag;
+    return value;
+}
+
 static pnnx::ExportedArgument make_bool(bool boolean)
 {
     pnnx::ExportedArgument value;
@@ -149,6 +158,8 @@ static bool same_argument(const pnnx::ExportedArgument& actual, const pnnx::Expo
         return actual.float_value == expected.float_value;
     if (actual.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST)
         return actual.float_values == expected.float_values;
+    if (actual.type == pnnx::EXPORTED_ARGUMENT_COMPLEX)
+        return actual.complex_real_value == expected.complex_real_value && actual.complex_imag_value == expected.complex_imag_value;
     if (actual.type == pnnx::EXPORTED_ARGUMENT_BOOL)
         return actual.bool_value == expected.bool_value;
     if (actual.type == pnnx::EXPORTED_ARGUMENT_BOOL_LIST)
@@ -286,6 +297,12 @@ static void test_default_arguments()
         std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("approximate", make_string("none"))}, "string defaults");
 
     expect_canonical(
+        make_node("torch.ops.aten.sub.Tensor", std::vector<pnnx::ExportedNamedArgument>{
+                                                     make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+                                                     make_input("other", make_complex(0.0, 4.0), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
+        std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("other", make_complex(0.0, 4.0)), make_expected("alpha", make_int(1))}, "complex scalar");
+
+    expect_canonical(
         make_node("torch.ops.aten.max_pool2d.default", std::vector<pnnx::ExportedNamedArgument>{
                                                            make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
                                                            make_input("kernel_size", make_ints(std::vector<int64_t>{2, 2}), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
@@ -388,9 +405,9 @@ static void test_binding_errors()
 
     expect_canonical_error(
         make_node("torch.ops.aten.add.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                   make_input("self", make_unsupported("as_complex"), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+                                                   make_input("self", make_unsupported("as_int_lists"), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
                                                    make_input("other", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
-        make_header(), "unsupported serialized argument as_complex", "unsupported argument");
+        make_header(), "unsupported serialized argument as_int_lists", "unsupported argument");
 
     expect_canonical_error(make_node("torch.ops.aten.no_such_operator.default", std::vector<pnnx::ExportedNamedArgument>()), make_header(), "cannot resolve dispatcher schema", "missing dispatcher schema");
     expect_canonical_error(make_node("torch.ops.aten.relu.default", std::vector<pnnx::ExportedNamedArgument>{make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}), make_header(-1), "missing aten opset", "missing aten opset");
@@ -431,6 +448,12 @@ static std::string argument_text(const pnnx::ExportedArgument& value)
     }
     if (value.type == pnnx::EXPORTED_ARGUMENT_BOOL)
         return value.bool_value ? "bool:true" : "bool:false";
+    if (value.type == pnnx::EXPORTED_ARGUMENT_COMPLEX)
+    {
+        text.precision(17);
+        text << "complex:" << value.complex_real_value << ',' << value.complex_imag_value;
+        return text.str();
+    }
     if (value.type == pnnx::EXPORTED_ARGUMENT_STRING)
         return "string:" + value.string_value;
 

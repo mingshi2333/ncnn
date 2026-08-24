@@ -45,6 +45,8 @@ ExportedArgument::ExportedArgument()
     type = EXPORTED_ARGUMENT_NONE;
     int_value = 0;
     float_value = 0.0;
+    complex_real_value = 0.0;
+    complex_imag_value = 0.0;
     bool_value = false;
     enum_value = 0;
 }
@@ -884,6 +886,26 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
         argument.type = EXPORTED_ARGUMENT_FLOAT_LIST;
         return read_double_array(payload, argument.float_values, tag_path, error);
     }
+    if (tag == "as_complex")
+    {
+        if (payload.type() != JSON_OBJECT)
+            return schema_error(error, tag_path, "expected object");
+
+        const JsonValue* real = required_field(payload, "real", tag_path, error);
+        if (!real)
+            return -1;
+        if (read_double(*real, argument.complex_real_value, tag_path + ".real", error) != 0)
+            return -1;
+
+        const JsonValue* imag = required_field(payload, "imag", tag_path, error);
+        if (!imag)
+            return -1;
+        if (read_double(*imag, argument.complex_imag_value, tag_path + ".imag", error) != 0)
+            return -1;
+
+        argument.type = EXPORTED_ARGUMENT_COMPLEX;
+        return 0;
+    }
     if (tag == "as_string")
     {
         argument.type = EXPORTED_ARGUMENT_STRING;
@@ -1032,7 +1054,7 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
 
     JsonType expected_type = JSON_NULL;
     bool known_unsupported = true;
-    if (tag == "as_optional_tensor" || tag == "as_complex" || tag == "as_string_to_argument")
+    if (tag == "as_optional_tensor" || tag == "as_string_to_argument")
         expected_type = JSON_OBJECT;
     else if (tag == "as_optional_tensors" || tag == "as_nested_tensors" || tag == "as_int_lists" || tag == "as_float_lists")
         expected_type = JSON_ARRAY;

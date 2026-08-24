@@ -77,6 +77,15 @@ static pnnx::ExportedArgument make_float(double value)
     return argument;
 }
 
+static pnnx::ExportedArgument make_complex(double real, double imag)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_COMPLEX;
+    argument.complex_real_value = real;
+    argument.complex_imag_value = imag;
+    return argument;
+}
+
 static pnnx::ExportedArgument make_floats(const std::vector<double>& values)
 {
     pnnx::ExportedArgument argument;
@@ -923,6 +932,63 @@ static void test_higher_order_graph_lowering()
     pnnx::ExportedProgram mismatched_metadata = make_higher_order_program();
     mismatched_metadata.graph.nodes[1].inputs[1].arg.graph_value->tensor_values["captured"] = make_tensor_meta(std::vector<int64_t>{1, 4});
     expect_lower_error(mismatched_metadata, std::map<std::string, pnnx::MaterializedExportedTensor>(), "subgraph tensor metadata does not match bound value", "higher order metadata mismatch");
+}
+
+static void test_complex_scalar_lowering()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode sub;
+    sub.name = "sub";
+    sub.has_name = true;
+    sub.target = "torch.ops.aten.sub.Tensor";
+    sub.inputs.push_back(make_input("self", "x"));
+    sub.inputs.push_back(make_input("other", make_complex(0.0, 4.0)));
+    sub.outputs.push_back(make_tensor("sub"));
+    program.graph.nodes.push_back(sub);
+    program.graph.outputs.push_back(make_tensor("sub"));
+
+    pnnx::ExportedTensorMeta meta = make_tensor_meta(std::vector<int64_t>{3, 15});
+    meta.dtype = 10;
+    program.graph.tensor_values["x"] = meta;
+    program.graph.tensor_values["sub"] = meta;
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("sub");
+    program.output_specs.push_back(output);
+
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "complex scalar", "lowering failed: " + error);
+    check(error.empty(), "complex scalar", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* op = find_operator(graph, "aten::sub");
+    check(op && op->inputs.size() == 3, "complex scalar", "sub inputs are not canonical");
+    check(op && op->inputs.size() == 3 && op->inputs[1]->producer && op->inputs[1]->producer->type == "prim::Constant", "complex scalar", "complex argument is not a constant");
+    if (!op || op->inputs.size() != 3 || !op->inputs[1]->producer || !op->inputs[1]->producer->has_param("value"))
+        return;
+
+    const pnnx::Parameter& complex_value = op->inputs[1]->producer->params.at("value");
+    const pnnx::Parameter& alpha = op->inputs[2]->producer->params.at("value");
+    check(complex_value.type == 10 && complex_value.c.real() == 0.f && complex_value.c.imag() == 4.f, "complex scalar", "complex constant value changed");
+    check(alpha.type == 2 && alpha.i == 1, "complex scalar", "default alpha changed");
+    check(op->inputs[0]->type == 10 && op->outputs.size() == 1 && op->outputs[0]->type == 10, "complex scalar", "complex tensor metadata changed");
 }
 
 static void test_output_tree_lowering()
@@ -2460,6 +2526,7 @@ int main(int argc, char** argv)
 
     test_linear_relu_graph();
     test_higher_order_graph_lowering();
+    test_complex_scalar_lowering();
     test_output_tree_lowering();
     test_linear_default_bias_constant();
     test_conv2d_constant_arguments();

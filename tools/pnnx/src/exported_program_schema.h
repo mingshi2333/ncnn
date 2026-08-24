@@ -67,6 +67,7 @@ enum ExportedArgumentType
     EXPORTED_ARGUMENT_INT_LIST,
     EXPORTED_ARGUMENT_FLOAT,
     EXPORTED_ARGUMENT_FLOAT_LIST,
+    EXPORTED_ARGUMENT_COMPLEX,
     EXPORTED_ARGUMENT_BOOL,
     EXPORTED_ARGUMENT_BOOL_LIST,
     EXPORTED_ARGUMENT_STRING,
@@ -96,6 +97,8 @@ struct ExportedArgument
     std::string name;
     int64_t int_value;
     double float_value;
+    double complex_real_value;
+    double complex_imag_value;
     bool bool_value;
     std::string string_value;
     std::vector<std::string> tensor_names;
