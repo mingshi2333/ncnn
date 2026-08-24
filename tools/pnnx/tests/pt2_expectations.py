@@ -348,7 +348,7 @@ PT2_EXPECTATIONS = {
     "test_pnnx_fuse_linear_batchnorm1d": (PASS, ""),
     "test_pnnx_fuse_multiheadattention": (PASS, ""),
     "test_pnnx_fuse_pad_conv1d": (PASS, ""),
-    "test_pnnx_fuse_pad_conv2d": (PNNX_LOWERING_UNSUPPORTED, "############# pass_level5"),
+    "test_pnnx_fuse_pad_conv2d": (PASS, ""),
     "test_pnnx_fuse_pixel_shuffle": (PASS, ""),
     "test_pnnx_fuse_pixel_unshuffle": (PASS, ""),
     "test_pnnx_fuse_rmsnorm": (PASS, ""),
