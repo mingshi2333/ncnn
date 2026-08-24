@@ -294,6 +294,22 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
         if (exported_scalar_type_to_pnnx(argument.enum_value, parameter.i) != 0)
             return -1;
     }
+    else if (argument.type == EXPORTED_ARGUMENT_DEVICE)
+    {
+        if (argument.device_value.type.empty())
+            return -1;
+        if (argument.device_value.has_index && (argument.device_value.index < 0 || argument.device_value.index > 127))
+            return -1;
+
+        parameter.type = 4;
+        parameter.s = argument.device_value.type;
+        if (argument.device_value.has_index)
+        {
+            std::ostringstream device;
+            device << argument.device_value.type << ':' << argument.device_value.index;
+            parameter.s = device.str();
+        }
+    }
     else
         return -1;
 

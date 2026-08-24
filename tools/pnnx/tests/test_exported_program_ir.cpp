@@ -107,6 +107,16 @@ static pnnx::ExportedArgument make_enum(pnnx::ExportedArgumentType type, int64_t
     return argument;
 }
 
+static pnnx::ExportedArgument make_device(const std::string& type, int64_t index = 0, bool has_index = false)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = pnnx::EXPORTED_ARGUMENT_DEVICE;
+    argument.device_value.type = type;
+    argument.device_value.index = index;
+    argument.device_value.has_index = has_index;
+    return argument;
+}
+
 static pnnx::ExportedNamedArgument make_input(const std::string& name, const std::string& tensor_name)
 {
     pnnx::ExportedNamedArgument input;
@@ -1117,6 +1127,71 @@ static void test_scalar_type_argument_lowering()
     }
 }
 
+static void test_device_argument_lowering()
+{
+    struct DeviceCase
+    {
+        const char* type;
+        int64_t index;
+        bool has_index;
+        const char* expected;
+    };
+
+    const DeviceCase cases[] = {
+        {"cpu", 0, false, "cpu"},
+        {"cpu", 0, true, "cpu:0"},
+        {"cuda", 2, true, "cuda:2"},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        const pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.ones_like.default", "ones_like",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_keyword_input("device", make_device(cases[i].type, cases[i].index, cases[i].has_index))});
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "device argument", error);
+        if (result != 0)
+            continue;
+
+        pnnx::Operator* ones_like = find_operator(graph, "aten::ones_like");
+        check(ones_like && ones_like->inputnames == std::vector<std::string>({"self", "dtype", "layout", "device", "pin_memory", "memory_format"}), "device argument", "ones_like input names are not canonical");
+        check(ones_like && ones_like->inputs.size() == 6 && ones_like->inputs[3]->producer && ones_like->inputs[3]->producer->has_param("value"), "device argument", "device constant is missing");
+        if (ones_like && ones_like->inputs.size() == 6 && ones_like->inputs[3]->producer && ones_like->inputs[3]->producer->has_param("value"))
+        {
+            const pnnx::Parameter& device = ones_like->inputs[3]->producer->params.at("value");
+            check(device.type == 4 && device.s == cases[i].expected, "device argument", "device string is wrong");
+        }
+
+        pnnx::pass_level2(graph);
+        check(count_operator(graph, "aten::ones_like") == 0 && count_operator(graph, "torch.ones_like") == 1, "device argument pass level2", "ones_like did not consume the device constant");
+    }
+
+    const DeviceCase unsupported_cases[] = {
+        {"", 0, false, ""},
+        {"cuda", -1, true, ""},
+        {"cuda", 128, true, ""},
+    };
+
+    for (size_t i = 0; i < sizeof(unsupported_cases) / sizeof(unsupported_cases[0]); i++)
+    {
+        const pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.ones_like.default", "ones_like",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_keyword_input("device", make_device(unsupported_cases[i].type, unsupported_cases[i].index, unsupported_cases[i].has_index))});
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result != 0, "device argument rejection", "invalid device unexpectedly lowered");
+        check(error.find("unsupported non-tensor argument device") != std::string::npos, "device argument rejection", "wrong error " + error);
+        check(graph.ops.empty() && graph.operands.empty(), "device argument rejection", "failed lowering mutated the destination graph");
+    }
+}
+
 static void test_alias_elimination()
 {
     {
@@ -1523,6 +1598,7 @@ int main(int argc, char** argv)
     test_tensor_list_output_lowering();
     test_string_and_memory_format_argument_lowering();
     test_scalar_type_argument_lowering();
+    test_device_argument_lowering();
     test_alias_elimination();
     test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();
