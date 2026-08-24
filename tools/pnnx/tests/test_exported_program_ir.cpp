@@ -1742,6 +1742,74 @@ static void test_avg_pool_empty_stride_normalization()
     }
 }
 
+static void test_max_pool_empty_stride_normalization()
+{
+    struct MaxPoolCase
+    {
+        const char* target;
+        const char* aten_type;
+        const char* functional_type;
+        const char* output_name;
+        std::vector<int64_t> kernel_size;
+        std::vector<int64_t> stride;
+        std::vector<int64_t> padding;
+        std::vector<int64_t> dilation;
+    };
+
+    const MaxPoolCase cases[] = {
+        {"torch.ops.aten.max_pool1d.default", "aten::max_pool1d", "F.max_pool1d", "max_pool1d", std::vector<int64_t>{2}, std::vector<int64_t>{1}, std::vector<int64_t>{0}, std::vector<int64_t>{1}},
+        {"torch.ops.aten.max_pool2d.default", "aten::max_pool2d", "F.max_pool2d", "max_pool2d", std::vector<int64_t>{2, 2}, std::vector<int64_t>{1, 2}, std::vector<int64_t>{0, 0}, std::vector<int64_t>{1, 1}},
+        {"torch.ops.aten.max_pool3d.default", "aten::max_pool3d", "F.max_pool3d", "max_pool3d", std::vector<int64_t>{2, 2, 2}, std::vector<int64_t>{1, 2, 1}, std::vector<int64_t>{0, 0, 0}, std::vector<int64_t>{1, 1, 1}},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        const MaxPoolCase& c = cases[i];
+        std::vector<pnnx::ExportedNamedArgument> arguments;
+        arguments.push_back(make_input("kernel_size", make_ints(c.kernel_size)));
+        arguments.push_back(make_input("stride", make_ints(std::vector<int64_t>())));
+        arguments.push_back(make_input("padding", make_ints(c.padding)));
+        arguments.push_back(make_input("dilation", make_ints(c.dilation)));
+        arguments.push_back(make_input("ceil_mode", make_bool(false)));
+
+        pnnx::ExportedProgram program = make_unary_program(c.target, c.output_name, arguments);
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "max pool empty stride", error);
+        if (result == 0)
+        {
+            pnnx::Operator* max_pool = find_operator(graph, c.aten_type);
+            check(max_pool && max_pool->inputs.size() >= 3 && max_pool->inputs[2]->producer && max_pool->inputs[2]->producer->has_param("value"), "max pool empty stride", "raw stride constant is missing");
+            if (max_pool && max_pool->inputs.size() >= 3 && max_pool->inputs[2]->producer && max_pool->inputs[2]->producer->has_param("value"))
+            {
+                const pnnx::Parameter& stride = max_pool->inputs[2]->producer->params.at("value");
+                check(stride.type == 5 && stride.ai.empty(), "max pool empty stride", "front end changed the serialized empty list");
+            }
+
+            pnnx::pass_level2(graph);
+            pnnx::Operator* functional_max_pool = find_operator(graph, c.functional_type);
+            check(functional_max_pool != 0, "max pool empty stride pass level2", "max pool was not canonicalized");
+            check(functional_max_pool && functional_max_pool->has_param("stride") && functional_max_pool->params.at("stride").type == 0, "max pool empty stride pass level2", "empty stride was not normalized to None");
+        }
+
+        arguments[1] = make_input("stride", make_ints(c.stride));
+        program = make_unary_program(c.target, c.output_name, arguments);
+        pnnx::Graph nonempty_graph;
+        error.clear();
+        const int nonempty_result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), nonempty_graph, error);
+
+        check(nonempty_result == 0, "max pool nonempty stride", error);
+        if (nonempty_result == 0)
+        {
+            pnnx::pass_level2(nonempty_graph);
+            pnnx::Operator* functional_max_pool = find_operator(nonempty_graph, c.functional_type);
+            check(functional_max_pool && functional_max_pool->has_param("stride") && functional_max_pool->params.at("stride").type == 5 && functional_max_pool->params.at("stride").ai == std::vector<int>(c.stride.begin(), c.stride.end()), "max pool nonempty stride pass level2", "explicit stride changed");
+        }
+    }
+}
+
 static void test_alias_elimination()
 {
     {
@@ -2165,6 +2233,7 @@ int main(int argc, char** argv)
     test_empty_int_list_parameter_roundtrip();
     test_nearest_exact_vec_size_lowering();
     test_avg_pool_empty_stride_normalization();
+    test_max_pool_empty_stride_normalization();
     test_alias_elimination();
     test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();
