@@ -845,6 +845,83 @@ static void test_conv_nd_direct_lowering()
     }
 }
 
+static void test_conv_transpose_nd_direct_lowering()
+{
+    struct ConvTransposeCase
+    {
+        const char* target;
+        const char* aten_type;
+        const char* canonical_type;
+        std::vector<int64_t> weight_shape;
+        std::vector<int64_t> input_shape;
+        std::vector<int64_t> output_shape;
+        std::vector<int> unit_values;
+    };
+
+    const ConvTransposeCase cases[] = {
+        {"torch.ops.aten.conv_transpose1d.default", "aten::conv_transpose1d", "F.conv_transpose1d", std::vector<int64_t>{4, 3, 3}, std::vector<int64_t>{1, 4, 8}, std::vector<int64_t>{1, 3, 10}, std::vector<int>{1}},
+        {"torch.ops.aten.conv_transpose2d.input", "aten::conv_transpose2d", "F.conv_transpose2d", std::vector<int64_t>{4, 3, 3, 3}, std::vector<int64_t>{1, 4, 8, 8}, std::vector<int64_t>{1, 3, 10, 10}, std::vector<int>{1, 1}},
+        {"torch.ops.aten.conv_transpose3d.input", "aten::conv_transpose3d", "F.conv_transpose3d", std::vector<int64_t>{4, 3, 3, 3, 3}, std::vector<int64_t>{1, 4, 8, 8, 8}, std::vector<int64_t>{1, 3, 10, 10, 10}, std::vector<int>{1, 1, 1}},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        const ConvTransposeCase& c = cases[i];
+        pnnx::ExportedProgram program = make_conv2d_program();
+        program.graph.nodes[0].target = c.target;
+        program.graph.tensor_values["p_conv_weight"] = make_tensor_meta(c.weight_shape);
+        program.graph.tensor_values["x"] = make_tensor_meta(c.input_shape);
+        program.graph.tensor_values["conv2d"] = make_tensor_meta(c.output_shape);
+
+        std::vector<int> weight_shape(c.weight_shape.begin(), c.weight_shape.end());
+        size_t weight_count = 1;
+        for (size_t j = 0; j < c.weight_shape.size(); j++)
+            weight_count *= (size_t)c.weight_shape[j];
+        std::map<std::string, pnnx::MaterializedExportedTensor> state;
+        state["conv.weight"] = make_state_tensor(weight_shape, weight_count * 4);
+
+        pnnx::Graph graph;
+        std::string error = "stale";
+        const int result = pnnx::lower_exported_program(program, state, graph, error);
+
+        check(result == 0, "conv transpose nd direct", "lowering failed: " + error);
+        check(error.empty(), "conv transpose nd direct", "success retained an error");
+        if (result != 0)
+            continue;
+
+        pnnx::Operator* conv = find_operator(graph, c.aten_type);
+        check(conv && conv->inputnames == std::vector<std::string>({"input", "weight", "bias", "stride", "padding", "output_padding", "groups", "dilation"}), "conv transpose nd direct", "canonical argument names changed");
+        check(conv && conv->inputs.size() == 8, "conv transpose nd direct", "conv transpose does not have eight canonical inputs");
+        if (!conv || conv->inputs.size() != 8)
+            continue;
+
+        const pnnx::Parameter& bias = conv->inputs[2]->producer->params.at("value");
+        const pnnx::Parameter& stride = conv->inputs[3]->producer->params.at("value");
+        const pnnx::Parameter& padding = conv->inputs[4]->producer->params.at("value");
+        const pnnx::Parameter& output_padding = conv->inputs[5]->producer->params.at("value");
+        const pnnx::Parameter& groups = conv->inputs[6]->producer->params.at("value");
+        const pnnx::Parameter& dilation = conv->inputs[7]->producer->params.at("value");
+        check(bias.type == 0, "conv transpose nd direct", "bias default changed");
+        check(stride.type == 5 && stride.ai == c.unit_values, "conv transpose nd direct", "stride default changed");
+        check(padding.type == 5 && padding.ai == std::vector<int>(c.unit_values.size(), 0), "conv transpose nd direct", "padding default changed");
+        check(output_padding.type == 5 && output_padding.ai == std::vector<int>(c.unit_values.size(), 0), "conv transpose nd direct", "output padding default changed");
+        check(groups.type == 2 && groups.i == 1, "conv transpose nd direct", "groups default changed");
+        check(dilation.type == 5 && dilation.ai == c.unit_values, "conv transpose nd direct", "dilation default changed");
+
+        pnnx::pass_level2(graph);
+        pnnx::Operator* canonical = find_operator(graph, c.canonical_type);
+        check(find_operator(graph, c.aten_type) == 0 && canonical != 0, "conv transpose nd direct pass level2", "direct transposed convolution was not canonicalized");
+        check(canonical && canonical->inputnames == std::vector<std::string>({"input", "weight", "bias", "stride", "padding", "output_padding", "groups", "dilation"}) && canonical->inputs.size() == 8, "conv transpose nd direct pass level2", "canonical inputs changed");
+        if (canonical && canonical->inputs.size() == 8)
+        {
+            const pnnx::Parameter& canonical_output_padding = canonical->inputs[5]->producer->params.at("value");
+            const pnnx::Parameter& canonical_dilation = canonical->inputs[7]->producer->params.at("value");
+            check(canonical_output_padding.type == 5 && canonical_output_padding.ai == std::vector<int>(c.unit_values.size(), 0), "conv transpose nd direct pass level2", "canonical output padding changed");
+            check(canonical_dilation.type == 5 && canonical_dilation.ai == c.unit_values, "conv transpose nd direct pass level2", "canonical dilation changed");
+        }
+    }
+}
+
 static void test_batch_norm_constant_arguments()
 {
     const pnnx::ExportedProgram program = make_batch_norm_program();
@@ -1885,6 +1962,7 @@ int main(int argc, char** argv)
     test_linear_default_bias_constant();
     test_conv2d_constant_arguments();
     test_conv_nd_direct_lowering();
+    test_conv_transpose_nd_direct_lowering();
     test_batch_norm_constant_arguments();
     test_inplace_relu_is_functionalized_by_level2();
     test_max_pool2d_constant_arguments();
