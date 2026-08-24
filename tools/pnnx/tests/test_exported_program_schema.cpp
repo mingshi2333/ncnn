@@ -669,6 +669,33 @@ static void test_graph_arguments()
     if (parse_argument_case("{\"as_sym_ints\":[{\"as_int\":2},{\"as_int\":-1}]}", ",\"kind\":1", argument, kind, "argument static sym ints"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_INT_LIST && argument.int_values.size() == 2 && argument.int_values[1] == -1, "argument static sym ints", "static sym ints changed");
 
+    if (parse_argument_case("{\"as_sym_ints\":[]}", ",\"kind\":1", argument, kind, "argument empty sym ints"))
+        check(argument.type == pnnx::EXPORTED_ARGUMENT_INT_LIST && argument.int_values.empty(), "argument empty sym ints", "empty sym ints changed");
+
+    {
+        ProgramFixture fixture;
+        fixture.sym_int_values = "{\"s0\":{\"as_expr\":{\"expr_str\":\"Symbol('u0', integer=True)\",\"hint\":null}},\"s1\":{\"as_expr\":{\"expr_str\":\"Symbol('u1', integer=True)\",\"hint\":null}}}";
+        fixture.nodes = "[{\"target\":\"torch.ops.aten.reshape.default\",\"inputs\":[{\"name\":\"self\",\"arg\":" + tensor_argument_json("x") + ",\"kind\":1},{\"name\":\"shape\",\"arg\":{\"as_sym_ints\":[{\"as_int\":3},{\"as_name\":\"s0\"},{\"as_int\":16},{\"as_name\":\"s1\"}]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+
+        pnnx::ExportedProgram program;
+        if (parse_program_fixture(fixture, program, "argument dynamic sym ints"))
+        {
+            argument = program.graph.nodes[0].inputs[1].arg;
+            check(argument.type == pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT_LIST, "argument dynamic sym ints", "dynamic SymInt list type changed");
+            check(argument.symbolic_int_values.size() == 4, "argument dynamic sym ints", "dynamic SymInt list length changed");
+            if (argument.symbolic_int_values.size() == 4)
+            {
+                check(argument.symbolic_int_values[0].type == pnnx::EXPORTED_SYM_INT_LIST_STATIC && argument.symbolic_int_values[0].value == 3, "argument dynamic sym ints", "first static value changed");
+                check(argument.symbolic_int_values[1].type == pnnx::EXPORTED_SYM_INT_LIST_SYMBOLIC && argument.symbolic_int_values[1].name == "s0", "argument dynamic sym ints", "first symbolic value changed");
+                check(argument.symbolic_int_values[2].type == pnnx::EXPORTED_SYM_INT_LIST_STATIC && argument.symbolic_int_values[2].value == 16, "argument dynamic sym ints", "second static value changed");
+                check(argument.symbolic_int_values[3].type == pnnx::EXPORTED_SYM_INT_LIST_SYMBOLIC && argument.symbolic_int_values[3].name == "s1", "argument dynamic sym ints", "second symbolic value changed");
+            }
+        }
+
+        fixture.sym_int_values = "{\"s0\":{\"as_expr\":{\"expr_str\":\"Symbol('u0', integer=True)\",\"hint\":null}}}";
+        expect_program_error(fixture, "$.graph_module.graph.sym_int_values.s1", "missing symbolic int value", "argument dynamic sym ints missing symbol");
+    }
+
     if (parse_argument_case("{\"as_sym_float\":{\"as_float\":1.5}}", ",\"kind\":1", argument, kind, "argument static sym float"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_FLOAT && argument.float_value == 1.5, "argument static sym float", "static sym float changed");
 
@@ -745,6 +772,18 @@ static void test_graph_arguments()
     fixture = ProgramFixture();
     fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_ints\":[1,true]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
     expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[0].arg.as_ints[1]", "expected integer", "argument list item type");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.reshape.default\",\"inputs\":[{\"name\":\"self\",\"arg\":" + tensor_argument_json("x") + ",\"kind\":1},{\"name\":\"shape\",\"arg\":{\"as_sym_ints\":[{\"as_float\":1.0}]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[1].arg.as_sym_ints[0]", "unknown symbolic argument tag as_float", "argument dynamic sym ints element tag");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.reshape.default\",\"inputs\":[{\"name\":\"self\",\"arg\":" + tensor_argument_json("x") + ",\"kind\":1},{\"name\":\"shape\",\"arg\":{\"as_sym_ints\":[{\"as_name\":\"\"}]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[1].arg.as_sym_ints[0].as_name", "symbolic argument name must not be empty", "argument dynamic sym ints empty symbol");
+
+    fixture = ProgramFixture();
+    fixture.nodes = "[{\"target\":\"torch.ops.aten.reshape.default\",\"inputs\":[{\"name\":\"self\",\"arg\":" + tensor_argument_json("x") + ",\"kind\":1},{\"name\":\"shape\",\"arg\":{\"as_sym_ints\":[{\"as_int\":\"3\"}]},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+    expect_program_error(fixture, "$.graph_module.graph.nodes[0].inputs[1].arg.as_sym_ints[0].as_int", "expected integer", "argument dynamic sym ints static type");
 
     fixture = ProgramFixture();
     fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_float\":\"infinity\"},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";

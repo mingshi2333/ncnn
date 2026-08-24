@@ -110,6 +110,21 @@ struct ExportedPayloadConfig
 
 struct ExportedGraph;
 
+enum ExportedSymIntListElementType
+{
+    EXPORTED_SYM_INT_LIST_STATIC,
+    EXPORTED_SYM_INT_LIST_SYMBOLIC
+};
+
+struct ExportedSymIntListElement
+{
+    ExportedSymIntListElement();
+
+    ExportedSymIntListElementType type;
+    int64_t value;
+    std::string name;
+};
+
 enum ExportedArgumentType
 {
     EXPORTED_ARGUMENT_NONE,
@@ -130,6 +145,7 @@ enum ExportedArgumentType
     EXPORTED_ARGUMENT_DEVICE,
     EXPORTED_ARGUMENT_GRAPH,
     EXPORTED_ARGUMENT_SYMBOLIC_INT,
+    EXPORTED_ARGUMENT_SYMBOLIC_INT_LIST,
     EXPORTED_ARGUMENT_SYMBOLIC_FLOAT,
     EXPORTED_ARGUMENT_SYMBOLIC_BOOL,
     EXPORTED_ARGUMENT_UNSUPPORTED
@@ -161,6 +177,7 @@ struct ExportedArgument
     std::vector<double> float_values;
     std::vector<bool> bool_values;
     std::vector<std::string> string_values;
+    std::vector<ExportedSymIntListElement> symbolic_int_values;
     int64_t enum_value;
     ExportedDevice device_value;
     std::string graph_name;

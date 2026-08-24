@@ -88,6 +88,12 @@ ExportedDevice::ExportedDevice()
     has_index = false;
 }
 
+ExportedSymIntListElement::ExportedSymIntListElement()
+{
+    type = EXPORTED_SYM_INT_LIST_STATIC;
+    value = 0;
+}
+
 ExportedArgument::ExportedArgument()
 {
     type = EXPORTED_ARGUMENT_NONE;
@@ -1135,15 +1141,59 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
         }
         return 0;
     }
-    if (tag == "as_sym_ints" || tag == "as_sym_floats" || tag == "as_sym_bools")
+    if (tag == "as_sym_ints")
     {
         if (payload.type() != JSON_ARRAY)
             return schema_error(error, tag_path, "expected array");
 
-        const std::string static_tag = tag == "as_sym_ints" ? "as_int" : tag == "as_sym_floats" ? "as_float"
-                                                                                                : "as_bool";
-        const JsonType static_type = tag == "as_sym_ints" ? JSON_INT64 : tag == "as_sym_floats" ? JSON_DOUBLE
-                                                                                                : JSON_BOOL;
+        bool dynamic = false;
+        std::vector<ExportedSymIntListElement> elements;
+        const std::vector<JsonValue>& values = payload.as_array();
+        elements.reserve(values.size());
+        for (size_t i = 0; i < values.size(); i++)
+        {
+            std::ostringstream item_path;
+            item_path << tag_path << '[' << i << ']';
+
+            ExportedArgument item;
+            if (read_static_sym_argument(values[i], "as_int", "as_name", JSON_INT64, item, item_path.str(), error) != 0)
+                return -1;
+
+            ExportedSymIntListElement element;
+            if (item.type == EXPORTED_ARGUMENT_UNSUPPORTED)
+            {
+                dynamic = true;
+                element.type = EXPORTED_SYM_INT_LIST_SYMBOLIC;
+                element.name = item.name;
+            }
+            else
+            {
+                element.value = values[i].as_object().begin()->second.as_int64();
+            }
+            elements.push_back(element);
+        }
+
+        if (dynamic)
+        {
+            argument.type = EXPORTED_ARGUMENT_SYMBOLIC_INT_LIST;
+            argument.symbolic_int_values.swap(elements);
+        }
+        else
+        {
+            argument.type = EXPORTED_ARGUMENT_INT_LIST;
+            argument.int_values.reserve(elements.size());
+            for (size_t i = 0; i < elements.size(); i++)
+                argument.int_values.push_back(elements[i].value);
+        }
+        return 0;
+    }
+    if (tag == "as_sym_floats" || tag == "as_sym_bools")
+    {
+        if (payload.type() != JSON_ARRAY)
+            return schema_error(error, tag_path, "expected array");
+
+        const std::string static_tag = tag == "as_sym_floats" ? "as_float" : "as_bool";
+        const JsonType static_type = tag == "as_sym_floats" ? JSON_DOUBLE : JSON_BOOL;
         bool dynamic = false;
         const std::vector<JsonValue>& values = payload.as_array();
         for (size_t i = 0; i < values.size(); i++)
@@ -1163,9 +1213,7 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
             }
 
             const JsonValue& static_value = values[i].as_object().begin()->second;
-            if (tag == "as_sym_ints")
-                argument.int_values.push_back(static_value.as_int64());
-            else if (tag == "as_sym_floats")
+            if (tag == "as_sym_floats")
             {
                 double item = 0.0;
                 if (read_double(static_value, item, item_path.str() + ".as_float", error) != 0)
@@ -1183,8 +1231,7 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
         }
         else
         {
-            argument.type = tag == "as_sym_ints" ? EXPORTED_ARGUMENT_INT_LIST : tag == "as_sym_floats" ? EXPORTED_ARGUMENT_FLOAT_LIST
-                                                                                                       : EXPORTED_ARGUMENT_BOOL_LIST;
+            argument.type = tag == "as_sym_floats" ? EXPORTED_ARGUMENT_FLOAT_LIST : EXPORTED_ARGUMENT_BOOL_LIST;
         }
         return 0;
     }
@@ -1410,6 +1457,15 @@ static int validate_symbol_argument(const ExportedArgument& argument, const Expo
         return schema_error(error, schema_map_key_path(graph_path + ".sym_bool_values", argument.name), "missing symbolic bool value");
     if (argument.type == EXPORTED_ARGUMENT_SYMBOLIC_FLOAT && graph.sym_float_values.find(argument.name) == graph.sym_float_values.end())
         return schema_error(error, schema_map_key_path(graph_path + ".sym_float_values", argument.name), "missing symbolic float value");
+    if (argument.type == EXPORTED_ARGUMENT_SYMBOLIC_INT_LIST)
+    {
+        for (size_t i = 0; i < argument.symbolic_int_values.size(); i++)
+        {
+            const ExportedSymIntListElement& item = argument.symbolic_int_values[i];
+            if (item.type == EXPORTED_SYM_INT_LIST_SYMBOLIC && graph.sym_int_values.find(item.name) == graph.sym_int_values.end())
+                return schema_error(error, schema_map_key_path(graph_path + ".sym_int_values", item.name), "missing symbolic int value");
+        }
+    }
 
     return 0;
 }
