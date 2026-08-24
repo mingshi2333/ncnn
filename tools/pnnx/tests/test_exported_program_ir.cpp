@@ -4,6 +4,7 @@
 #include "exported_program_graph.h"
 #include "load_exported_program.h"
 #include "pass_level2.h"
+#include "pass_level3/fuse_expression.h"
 #include "pass_level3/fuse_op1ton_unpack.h"
 #include "pt2_archive.h"
 
@@ -1163,6 +1164,16 @@ static pnnx::Operator* find_operator(pnnx::Graph& graph, const std::string& type
     return 0;
 }
 
+static pnnx::Operator* find_operator_with_input_count(pnnx::Graph& graph, const std::string& type, size_t input_count)
+{
+    for (size_t i = 0; i < graph.ops.size(); i++)
+    {
+        if (graph.ops[i]->type == type && graph.ops[i]->inputs.size() == input_count)
+            return graph.ops[i];
+    }
+    return 0;
+}
+
 static int count_operator(const pnnx::Graph& graph, const std::string& type)
 {
     int count = 0;
@@ -1623,6 +1634,278 @@ static void test_symbolic_scalar_graph_normalization()
         check(normalized_sub != 0, "symbolic integer subtraction", "operator.sub was not normalized");
         check(normalized_sub && normalized_sub->inputs.size() == 2 && normalized_sub->inputs[0].name == "a" && normalized_sub->inputs[1].name == "b",
               "symbolic integer subtraction", "normalized input names changed");
+    }
+}
+
+static pnnx::ExportedProgram make_symbolic_scalar_lowering_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.13.0+cpu";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("x"));
+    program.graph.inputs.push_back(make_tensor("y"));
+    program.graph.inputs.push_back(make_tensor("condition"));
+
+    pnnx::ExportedNode item;
+    item.name = "item";
+    item.has_name = true;
+    item.target = "torch.ops.aten.item.default";
+    item.inputs.push_back(make_input("self", "x"));
+    item.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item"));
+    program.graph.nodes.push_back(item);
+
+    item.name = "item_1";
+    item.inputs[0] = make_input("self", "y");
+    item.outputs[0] = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item_1");
+    program.graph.nodes.push_back(item);
+
+    item.name = "condition_item";
+    item.inputs[0] = make_input("self", "condition");
+    item.outputs[0] = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "condition_item");
+    program.graph.nodes.push_back(item);
+
+    pnnx::ExportedNode scalar_tensor;
+    scalar_tensor.name = "condition_tensor";
+    scalar_tensor.has_name = true;
+    scalar_tensor.target = "torch.ops.aten.scalar_tensor.default";
+    scalar_tensor.inputs.push_back(make_input("s", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "condition_item")));
+    scalar_tensor.outputs.push_back(make_tensor("condition_tensor"));
+    program.graph.nodes.push_back(scalar_tensor);
+
+    pnnx::ExportedNode arange;
+    arange.name = "arange";
+    arange.has_name = true;
+    arange.target = "torch.ops.aten.arange.start_step";
+    arange.inputs.push_back(make_input("start", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item")));
+    arange.inputs.push_back(make_input("end", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item_1")));
+    arange.inputs.push_back(make_input("step", make_float(1.0)));
+    arange.outputs.push_back(make_tensor("arange"));
+    program.graph.nodes.push_back(arange);
+    program.graph.outputs.push_back(make_tensor("arange"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>());
+    program.graph.tensor_values["y"] = make_tensor_meta(std::vector<int64_t>());
+    program.graph.tensor_values["condition"] = make_tensor_meta(std::vector<int64_t>());
+    program.graph.tensor_values["condition"].dtype = 12;
+    program.graph.tensor_values["condition_tensor"] = make_tensor_meta(std::vector<int64_t>());
+    program.graph.tensor_values["condition_tensor"].dtype = 12;
+    program.graph.tensor_values["arange"] = make_tensor_meta(std::vector<int64_t>{4});
+    program.graph.tensor_values["arange"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    program.graph.tensor_values["arange"].sizes[0].expression = "TruncToInt(Add(Symbol('zuf1'), Mul(Integer(-1), Symbol('zuf0'))))";
+
+    pnnx::ExportedSymFloat sym_float;
+    sym_float.is_expression = true;
+    sym_float.expression = "Symbol('zuf0')";
+    program.graph.sym_float_values["item"] = sym_float;
+    sym_float.expression = "Symbol('zuf1')";
+    program.graph.sym_float_values["item_1"] = sym_float;
+
+    pnnx::ExportedSymBool sym_bool;
+    sym_bool.is_expression = true;
+    sym_bool.expression = "Symbol('zuf2')";
+    program.graph.sym_bool_values["condition_item"] = sym_bool;
+
+    const char* input_names[] = {"x", "y", "condition"};
+    for (size_t i = 0; i < sizeof(input_names) / sizeof(input_names[0]); i++)
+    {
+        pnnx::ExportedInputSpec input;
+        input.kind = pnnx::EXPORTED_USER_INPUT;
+        input.arg = make_tensor(input_names[i]);
+        program.input_specs.push_back(input);
+    }
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("arange");
+    program.output_specs.push_back(output);
+
+    return program;
+}
+
+static pnnx::ExportedProgram make_symbolic_integer_list_lowering_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.13.0+cpu";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode sym_size;
+    sym_size.name = "size";
+    sym_size.has_name = true;
+    sym_size.target = "torch.ops.aten.sym_size.int";
+    sym_size.inputs.push_back(make_input("self", "x"));
+    sym_size.inputs.push_back(make_input("dim", make_int(1)));
+    sym_size.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "size"));
+    program.graph.nodes.push_back(sym_size);
+
+    pnnx::ExportedNode sub;
+    sub.name = "sub";
+    sub.has_name = true;
+    sub.target = "_operator.sub";
+    sub.inputs.push_back(make_input("a", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "size")));
+    sub.inputs.push_back(make_input("b", make_int(1)));
+    sub.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sub"));
+    program.graph.nodes.push_back(sub);
+
+    pnnx::ExportedNode reshape;
+    reshape.name = "reshape";
+    reshape.has_name = true;
+    reshape.target = "torch.ops.aten.reshape.default";
+    reshape.inputs.push_back(make_input("self", "x"));
+    reshape.inputs.push_back(make_input("shape", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement>{
+                                                     make_static_sym_int_list_element(3),
+                                                     make_static_sym_int_list_element(16),
+                                                     make_static_sym_int_list_element(16),
+                                                     make_symbolic_sym_int_list_element("sub")})));
+    reshape.outputs.push_back(make_tensor("reshape"));
+    program.graph.nodes.push_back(reshape);
+
+    pnnx::ExportedNode expand;
+    expand.name = "expand";
+    expand.has_name = true;
+    expand.target = "torch.ops.aten.expand.default";
+    expand.inputs.push_back(make_input("self", "reshape"));
+    expand.inputs.push_back(make_input("size", make_symbolic_ints(std::vector<pnnx::ExportedSymIntListElement>{
+                                                   make_symbolic_sym_int_list_element("size"),
+                                                   make_static_sym_int_list_element(192)})));
+    expand.outputs.push_back(make_tensor("expand"));
+    program.graph.nodes.push_back(expand);
+    program.graph.outputs.push_back(make_tensor("expand"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{3, 17, 16, 16});
+    program.graph.tensor_values["x"].sizes[1].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    program.graph.tensor_values["x"].sizes[1].expression = "Symbol('s0', positive=True, integer=True)";
+    program.graph.tensor_values["reshape"] = make_tensor_meta(std::vector<int64_t>{3, 16, 16, 16});
+    program.graph.tensor_values["reshape"].sizes[3].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    program.graph.tensor_values["reshape"].sizes[3].expression = "Add(Symbol('s0', positive=True, integer=True), Integer(-1))";
+    program.graph.tensor_values["expand"] = make_tensor_meta(std::vector<int64_t>{17, 192});
+    program.graph.tensor_values["expand"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    program.graph.tensor_values["expand"].sizes[0].expression = "Symbol('s0', positive=True, integer=True)";
+
+    pnnx::ExportedSymInt sym_int;
+    sym_int.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    sym_int.expression = "Symbol('s0', positive=True, integer=True)";
+    program.graph.sym_int_values["size"] = sym_int;
+    sym_int.expression = "Add(Symbol('s0', positive=True, integer=True), Integer(-1))";
+    program.graph.sym_int_values["sub"] = sym_int;
+
+    pnnx::ExportedRangeConstraint constraint;
+    constraint.has_min = true;
+    constraint.min = 2;
+    constraint.has_max = true;
+    constraint.max = 32;
+    program.range_constraints["s0"] = constraint;
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("expand");
+    program.output_specs.push_back(output);
+
+    return program;
+}
+
+static void test_symbolic_scalar_lowering()
+{
+    {
+        const pnnx::ExportedProgram program = make_symbolic_scalar_lowering_program();
+        pnnx::Graph graph;
+        std::string error = "stale";
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+        check(result == 0, "symbolic scalar lower", "lowering failed: " + error);
+        check(error.empty(), "symbolic scalar lower", "success retained an error");
+        if (result == 0)
+        {
+            check(count_operator(graph, "aten::item") == 3, "symbolic scalar lower", "symbolic item outputs were not lowered");
+            check(count_operator(graph, "aten::scalar_tensor") == 1, "symbolic scalar lower", "symbolic bool input was not lowered");
+            check(count_operator(graph, "aten::arange") == 1, "symbolic scalar lower", "symbolic float inputs were not lowered");
+            const pnnx::Operand* item = graph.get_operand("item");
+            const pnnx::Operand* item_1 = graph.get_operand("item_1");
+            const pnnx::Operand* condition_item = graph.get_operand("condition_item");
+            const pnnx::Operand* arange = graph.get_operand("arange");
+            check(item && item_1 && condition_item, "symbolic scalar lower", "symbolic scalar operands are missing");
+            check(item && item->type == 0 && item->shape.empty(), "symbolic scalar lower", "SymFloat was materialized as a tensor");
+            check(condition_item && condition_item->type == 0 && condition_item->shape.empty(), "symbolic scalar lower", "SymBool was materialized as a tensor");
+            check(arange && arange->shape == std::vector<int>({-1}), "symbolic scalar lower", "runtime-dependent output shape is not dynamic");
+        }
+    }
+
+    {
+        const pnnx::ExportedProgram program = make_symbolic_integer_list_lowering_program();
+        pnnx::Graph graph;
+        std::string error = "stale";
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+        check(result == 0, "symbolic integer list lower", "lowering failed: " + error);
+        check(error.empty(), "symbolic integer list lower", "success retained an error");
+        if (result == 0)
+        {
+            pnnx::Operator* reshape_list = find_operator_with_input_count(graph, "prim::ListConstruct", 4);
+            pnnx::Operator* expand_list = find_operator_with_input_count(graph, "prim::ListConstruct", 2);
+            check(reshape_list && reshape_list->inputs[3]->name == "sub", "symbolic integer list lower", "reshape symbol is not connected in serialized order");
+            check(expand_list && expand_list->inputs[0]->name == "size", "symbolic integer list lower", "expand symbol is not connected in serialized order");
+            check(find_operator(graph, "aten::reshape") != 0, "symbolic integer list lower", "reshape was not lowered");
+            check(find_operator(graph, "aten::expand") != 0, "symbolic integer list lower", "expand was not lowered");
+            check(graph.get_operand("reshape") && graph.get_operand("reshape")->shape == std::vector<int>({3, 16, 16, -1}), "symbolic integer list lower", "reshape metadata changed");
+            check(graph.get_operand("expand") && graph.get_operand("expand")->shape == std::vector<int>({-1, 192}), "symbolic integer list lower", "expand metadata changed");
+
+            pnnx::fuse_expression(graph, std::set<std::string>(), std::string());
+            check(count_operator(graph, "prim::ListConstruct") == 0, "symbolic integer list expression", "dynamic list was not fused");
+            check(count_operator(graph, "pnnx.Expression") >= 2, "symbolic integer list expression", "dynamic lists were not represented as expressions");
+        }
+    }
+}
+
+static void test_reject_invalid_symbolic_scalar_lowering()
+{
+    {
+        pnnx::ExportedProgram program = make_symbolic_scalar_lowering_program();
+        program.graph.nodes.erase(program.graph.nodes.begin(), program.graph.nodes.begin() + 4);
+        expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unknown symbolic float value item for torch.ops.aten.arange.start_step", "unknown symbolic float input");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_symbolic_integer_list_lowering_program();
+        program.graph.nodes.erase(program.graph.nodes.begin(), program.graph.nodes.begin() + 2);
+        expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unknown symbolic integer value sub for symbolic integer-list argument shape", "unknown symbolic list element");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_linear_relu_program();
+        program.graph.tensor_values["relu"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+        program.graph.tensor_values["relu"].sizes[0].expression = "Symbol('u99', integer=True)";
+        expect_lower_error(program, make_linear_state(), "symbolic size u99 has no finite upper bound", "unbounded metadata without runtime producer");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_linear_relu_program();
+        program.graph.tensor_values["x"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+        program.graph.tensor_values["x"].sizes[0].expression = "Symbol('s0', positive=True, integer=True)";
+        program.graph.tensor_values["p_linear_weight"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+        program.graph.tensor_values["p_linear_weight"].sizes[0].expression = "Symbol('s0', positive=True, integer=True)";
+        expect_lower_error(program, make_linear_state(), "parameter linear.weight has dynamic tensor metadata", "dynamic parameter metadata");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_symbolic_scalar_lowering_program();
+        program.graph.inputs[0] = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "x");
+        program.input_specs[0].arg = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "x");
+        expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "user input x must be a tensor", "symbolic scalar user input");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_symbolic_scalar_lowering_program();
+        program.graph.outputs[0] = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item");
+        program.output_specs[0].arg = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_FLOAT, "item");
+        expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "user output item must be a tensor", "symbolic scalar user output");
     }
 }
 
@@ -3269,6 +3552,8 @@ int main(int argc, char** argv)
     test_bounded_dynamic_result_shape();
     test_dynamic_input_shape();
     test_symbolic_scalar_graph_normalization();
+    test_symbolic_scalar_lowering();
+    test_reject_invalid_symbolic_scalar_lowering();
     test_higher_order_graph_lowering();
     test_complex_scalar_lowering();
     test_output_tree_lowering();

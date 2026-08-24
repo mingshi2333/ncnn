@@ -447,6 +447,11 @@ struct ExportedCustomArgument
     ExportedCustomArgumentType type;
 };
 
+static const ExportedCustomArgument aten_sub_int_arguments[] = {
+    {"a", EXPORTED_CUSTOM_SYM_INT},
+    {"b", EXPORTED_CUSTOM_SYM_INT},
+};
+
 static const ExportedCustomArgument torchvision_deform_conv2d_arguments[] = {
     {"input", EXPORTED_CUSTOM_TENSOR},
     {"weight", EXPORTED_CUSTOM_TENSOR},
@@ -616,6 +621,9 @@ int canonicalize_exported_arguments(const ExportedNode& node,
         message << "archive aten opset " << aten_opset->second << " does not match linked libtorch opset " << linked_opset;
         return operator_error(header, node, message.str(), error);
     }
+
+    if (target.operator_name == "aten::sub" && target.overload_name == "int")
+        return canonicalize_with_custom_schema(node, header, aten_sub_int_arguments, sizeof(aten_sub_int_arguments) / sizeof(aten_sub_int_arguments[0]), result, error);
 
     try
     {

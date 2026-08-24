@@ -57,6 +57,14 @@ static pnnx::ExportedArgument make_int(int64_t number)
     return value;
 }
 
+static pnnx::ExportedArgument make_symbolic_int(const std::string& name)
+{
+    pnnx::ExportedArgument value;
+    value.type = pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT;
+    value.name = name;
+    return value;
+}
+
 static pnnx::ExportedArgument make_ints(const std::vector<int64_t>& numbers)
 {
     pnnx::ExportedArgument value;
@@ -154,6 +162,8 @@ static bool same_argument(const pnnx::ExportedArgument& actual, const pnnx::Expo
         return actual.int_value == expected.int_value;
     if (actual.type == pnnx::EXPORTED_ARGUMENT_INT_LIST)
         return actual.int_values == expected.int_values;
+    if (actual.type == pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT)
+        return actual.name == expected.name;
     if (actual.type == pnnx::EXPORTED_ARGUMENT_FLOAT)
         return actual.float_value == expected.float_value;
     if (actual.type == pnnx::EXPORTED_ARGUMENT_FLOAT_LIST)
@@ -258,6 +268,24 @@ static void test_targets()
     expect_target_error("torch.ops.aten.add.", "invalid overload name");
     expect_target_error("torch.ops.aten.add.Tensor.extra", "invalid operator name");
     expect_target_error("torch.ops.aten.add.Tensor-1", "invalid overload name");
+}
+
+static void test_non_dispatch_scalar_arguments()
+{
+    const std::vector<pnnx::ExportedNamedArgument> inputs = {
+        make_input("a", make_symbolic_int("size"), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("b", make_int(1), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+    };
+    const pnnx::ExportedNode node = make_node("torch.ops.aten.sub.int", inputs);
+    expect_canonical(node,
+                     std::vector<pnnx::CanonicalExportedArgument>{make_expected("a", make_symbolic_int("size")), make_expected("b", make_int(1))},
+                     "non-dispatch scalar sub");
+
+    std::vector<pnnx::ExportedNamedArgument> invalid_inputs = inputs;
+    invalid_inputs[1].arg = make_tensor("x");
+    expect_canonical_error(make_node("torch.ops.aten.sub.int", invalid_inputs), make_header(), "argument b must be SymInt", "non-dispatch scalar sub type");
+    expect_canonical_error(node, make_header(-1), "missing aten opset", "non-dispatch scalar sub missing opset");
+    expect_canonical_error(node, make_header(9), "does not match linked libtorch", "non-dispatch scalar sub opset mismatch");
 }
 
 static void test_torchvision_arguments()
@@ -597,6 +625,7 @@ int main(int argc, char** argv)
         return 2;
 
     test_targets();
+    test_non_dispatch_scalar_arguments();
     test_torchvision_arguments();
     test_default_arguments();
     test_binding_order_and_legacy_kind();
