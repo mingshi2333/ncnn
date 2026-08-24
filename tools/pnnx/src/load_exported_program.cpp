@@ -453,25 +453,56 @@ int lower_exported_program(const ExportedProgram& program,
 
         for (size_t j = 0; j < node.outputs.size(); j++)
         {
-            if (node.outputs[j].type != EXPORTED_ARGUMENT_TENSOR)
+            if (node.outputs[j].type == EXPORTED_ARGUMENT_TENSOR)
             {
-                error = "unsupported non-tensor output for " + node.target;
-                return -1;
+                const std::string& name = node.outputs[j].name;
+                if (values.find(name) != values.end())
+                {
+                    error = "tensor value " + name + " is defined more than once";
+                    return -1;
+                }
+                Operand* operand = candidate.new_operand(name);
+                operand_names.insert(name);
+                operand->producer = op;
+                op->outputs.push_back(operand);
+                if (set_tensor_metadata(program, name, operand, error) != 0)
+                    return -1;
+                values[name] = operand;
+                continue;
             }
 
-            const std::string& name = node.outputs[j].name;
-            if (values.find(name) != values.end())
+            if (node.outputs[j].type == EXPORTED_ARGUMENT_TENSOR_LIST)
             {
-                error = "tensor value " + name + " is defined more than once";
-                return -1;
+                std::ostringstream list_name;
+                list_name << "pnnx_" << unknown_index++;
+                Operator* unpack = candidate.new_operator_after("prim::ListUnpack", unique_name(list_name.str(), operator_names), op);
+                Operand* list_operand = candidate.new_operand(unique_name(list_name.str(), operand_names));
+                list_operand->producer = op;
+                list_operand->consumers.push_back(unpack);
+                op->outputs.push_back(list_operand);
+                unpack->inputs.push_back(list_operand);
+
+                for (size_t k = 0; k < node.outputs[j].tensor_names.size(); k++)
+                {
+                    const std::string& name = node.outputs[j].tensor_names[k];
+                    if (values.find(name) != values.end())
+                    {
+                        error = "tensor value " + name + " is defined more than once";
+                        return -1;
+                    }
+                    Operand* operand = candidate.new_operand(name);
+                    operand_names.insert(name);
+                    operand->producer = unpack;
+                    unpack->outputs.push_back(operand);
+                    if (set_tensor_metadata(program, name, operand, error) != 0)
+                        return -1;
+                    values[name] = operand;
+                }
+                continue;
             }
-            Operand* operand = candidate.new_operand(name);
-            operand_names.insert(name);
-            operand->producer = op;
-            op->outputs.push_back(operand);
-            if (set_tensor_metadata(program, name, operand, error) != 0)
-                return -1;
-            values[name] = operand;
+
+            error = "unsupported non-tensor output for " + node.target;
+            return -1;
         }
     }
 

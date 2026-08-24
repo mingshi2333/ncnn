@@ -3,6 +3,7 @@
 
 #include "load_exported_program.h"
 #include "pass_level2.h"
+#include "pass_level3/fuse_op1ton_unpack.h"
 #include "pt2_archive.h"
 
 #include <limits.h>
@@ -539,6 +540,47 @@ static pnnx::ExportedProgram make_cat_program()
     return program;
 }
 
+static pnnx::ExportedProgram make_chunk_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode chunk;
+    chunk.name = "chunk";
+    chunk.has_name = true;
+    chunk.target = "torch.ops.aten.chunk.default";
+    chunk.inputs.push_back(make_input("self", make_tensor("x")));
+    chunk.inputs.push_back(make_input("chunks", make_int(2)));
+    chunk.inputs.push_back(make_input("dim", make_int(1)));
+    chunk.outputs.push_back(make_tensors(std::vector<std::string>{"chunk_0", "chunk_1"}));
+    program.graph.nodes.push_back(chunk);
+    program.graph.outputs.push_back(make_tensor("chunk_0"));
+    program.graph.outputs.push_back(make_tensor("chunk_1"));
+
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 4});
+    program.graph.tensor_values["chunk_0"] = make_tensor_meta(std::vector<int64_t>{1, 2});
+    program.graph.tensor_values["chunk_1"] = make_tensor_meta(std::vector<int64_t>{1, 2});
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    const char* output_names[] = {"chunk_0", "chunk_1"};
+    for (size_t i = 0; i < sizeof(output_names) / sizeof(output_names[0]); i++)
+    {
+        pnnx::ExportedOutputSpec output;
+        output.kind = pnnx::EXPORTED_USER_OUTPUT;
+        output.arg = make_tensor(output_names[i]);
+        program.output_specs.push_back(output);
+    }
+    return program;
+}
+
 static pnnx::ExportedProgram make_unary_program(const std::string& target, const std::string& output_name, const std::vector<pnnx::ExportedNamedArgument>& arguments)
 {
     pnnx::ExportedProgram program;
@@ -923,6 +965,34 @@ static void test_tensor_list_argument_lowering()
     check(count_operator(graph, "aten::cat") == 0 && count_operator(graph, "torch.cat") == 1, "tensor list pass level2", "cat was not canonicalized");
 }
 
+static void test_tensor_list_output_lowering()
+{
+    const pnnx::ExportedProgram program = make_chunk_program();
+    pnnx::Graph graph;
+    std::string error;
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "tensor list output", error);
+    if (result != 0)
+        return;
+
+    pnnx::Operator* chunk = find_operator(graph, "aten::chunk");
+    pnnx::Operator* unpack = find_operator(graph, "prim::ListUnpack");
+    check(chunk != 0, "tensor list output", "missing aten::chunk");
+    check(unpack != 0, "tensor list output", "missing prim::ListUnpack");
+    check(chunk && chunk->outputs.size() == 1 && chunk->outputs[0]->consumers.size() == 1 && chunk->outputs[0]->consumers[0] == unpack, "tensor list output", "chunk list output is not connected to unpack");
+    check(unpack && unpack->inputs.size() == 1 && unpack->inputs[0]->producer == chunk, "tensor list output", "unpack does not consume the chunk list");
+    check(unpack && unpack->outputs.size() == 2 && unpack->outputs[0]->name == "chunk_0" && unpack->outputs[1]->name == "chunk_1", "tensor list output", "unpacked tensor names are out of order");
+    check(unpack && unpack->outputs.size() == 2 && unpack->outputs[0]->shape == std::vector<int>({1, 2}) && unpack->outputs[1]->shape == std::vector<int>({1, 2}), "tensor list output", "unpacked tensor metadata is missing");
+
+    pnnx::pass_level2(graph);
+    check(count_operator(graph, "aten::chunk") == 0 && count_operator(graph, "torch.chunk") == 1, "tensor list output pass level2", "chunk was not canonicalized");
+    pnnx::fuse_op1ton_unpack(graph);
+    chunk = find_operator(graph, "torch.chunk");
+    check(count_operator(graph, "prim::ListUnpack") == 0, "tensor list output pass level3", "list unpack was not fused");
+    check(chunk && chunk->outputs.size() == 2 && chunk->outputs[0]->name == "chunk_0" && chunk->outputs[1]->name == "chunk_1", "tensor list output pass level3", "chunk outputs were not flattened in order");
+}
+
 static void test_string_and_memory_format_argument_lowering()
 {
     {
@@ -1108,6 +1178,12 @@ static void test_reject_invalid_graph_definitions()
     {
         pnnx::ExportedProgram program = make_unary_program("torch.ops.aten.contiguous.default", "contiguous", std::vector<pnnx::ExportedNamedArgument>{make_keyword_input("memory_format", make_enum(pnnx::EXPORTED_ARGUMENT_MEMORY_FORMAT, 99))});
         expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unsupported non-tensor argument memory_format", "unknown memory format");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_chunk_program();
+        program.graph.tensor_values.erase("chunk_1");
+        expect_lower_error(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), "missing tensor metadata for chunk_1", "missing tensor-list output metadata");
     }
 }
 
@@ -1307,6 +1383,7 @@ int main(int argc, char** argv)
     test_flatten_dimensions();
     test_dispatcher_backed_target_lowering();
     test_tensor_list_argument_lowering();
+    test_tensor_list_output_lowering();
     test_string_and_memory_format_argument_lowering();
     test_reject_unsupported_signature_inputs();
     test_reject_non_inference_outputs();

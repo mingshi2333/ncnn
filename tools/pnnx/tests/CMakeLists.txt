@@ -129,7 +129,9 @@ add_executable(pnnx_test_exported_program_ir
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_max_pool2d.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_relu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_cat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_chunk.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_flatten.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level3/fuse_op1ton_unpack.cpp
 )
 target_include_directories(pnnx_test_exported_program_ir PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 target_compile_options(pnnx_test_exported_program_ir PRIVATE "${TORCH_CXX_FLAGS}")
