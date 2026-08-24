@@ -174,6 +174,22 @@ struct ExportedOutputSpec
     std::string target;
 };
 
+enum ExportedTreeSpecType
+{
+    EXPORTED_TREE_SPEC_NONE,
+    EXPORTED_TREE_SPEC_LEAF,
+    EXPORTED_TREE_SPEC_TUPLE,
+    EXPORTED_TREE_SPEC_LIST
+};
+
+struct ExportedTreeSpec
+{
+    ExportedTreeSpec();
+
+    ExportedTreeSpecType type;
+    std::vector<ExportedTreeSpec> children;
+};
+
 struct ExportedGraph
 {
     ExportedGraph();
@@ -192,6 +208,7 @@ struct ExportedProgram
     ExportedGraph graph;
     std::vector<ExportedInputSpec> input_specs;
     std::vector<ExportedOutputSpec> output_specs;
+    ExportedTreeSpec output_tree_spec;
 };
 
 struct ExportedSchemaError

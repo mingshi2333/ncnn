@@ -207,6 +207,83 @@ static std::string unique_name(const std::string& requested, std::set<std::strin
     }
 }
 
+static int validate_output_tree(const ExportedTreeSpec& tree_spec, size_t& leaf_count, std::string& error)
+{
+    if (tree_spec.type == EXPORTED_TREE_SPEC_LEAF)
+    {
+        if (!tree_spec.children.empty())
+        {
+            error = "output treespec leaf must not have children";
+            return -1;
+        }
+
+        leaf_count++;
+        return 0;
+    }
+
+    if (tree_spec.type != EXPORTED_TREE_SPEC_TUPLE && tree_spec.type != EXPORTED_TREE_SPEC_LIST)
+    {
+        error = "invalid output treespec type";
+        return -1;
+    }
+
+    for (size_t i = 0; i < tree_spec.children.size(); i++)
+    {
+        if (validate_output_tree(tree_spec.children[i], leaf_count, error) != 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+static int construct_output_tree(const ExportedTreeSpec& tree_spec,
+                                 const std::vector<Operand*>& flat_outputs,
+                                 size_t& flat_index,
+                                 Graph& graph,
+                                 std::set<std::string>& operand_names,
+                                 std::set<std::string>& operator_names,
+                                 int& unknown_index,
+                                 Operand*& output,
+                                 std::string& error)
+{
+    if (tree_spec.type == EXPORTED_TREE_SPEC_LEAF)
+    {
+        if (flat_index >= flat_outputs.size())
+        {
+            error = "output treespec consumes too many graph outputs";
+            return -1;
+        }
+
+        output = flat_outputs[flat_index++];
+        return 0;
+    }
+
+    std::vector<Operand*> children;
+    children.reserve(tree_spec.children.size());
+    for (size_t i = 0; i < tree_spec.children.size(); i++)
+    {
+        Operand* child = 0;
+        if (construct_output_tree(tree_spec.children[i], flat_outputs, flat_index, graph, operand_names, operator_names, unknown_index, child, error) != 0)
+            return -1;
+        children.push_back(child);
+    }
+
+    std::ostringstream generated_name;
+    generated_name << "pnnx_" << unknown_index++;
+    const char* operator_type = tree_spec.type == EXPORTED_TREE_SPEC_TUPLE ? "prim::TupleConstruct" : "prim::ListConstruct";
+    Operator* construct = graph.new_operator(operator_type, unique_name(generated_name.str(), operator_names));
+    output = graph.new_operand(unique_name(generated_name.str(), operand_names));
+    output->producer = construct;
+    construct->outputs.push_back(output);
+    for (size_t i = 0; i < children.size(); i++)
+    {
+        children[i]->consumers.push_back(construct);
+        construct->inputs.push_back(children[i]);
+    }
+
+    return 0;
+}
+
 static int exported_int_to_pnnx(int64_t value)
 {
     if (value == std::numeric_limits<int64_t>::max()) value = INT_MAX;
@@ -359,6 +436,17 @@ int lower_exported_program(const ExportedProgram& program,
         return -1;
     if (validate_signature_arguments(program, error) != 0)
         return -1;
+    if (program.output_tree_spec.type != EXPORTED_TREE_SPEC_NONE)
+    {
+        size_t leaf_count = 0;
+        if (validate_output_tree(program.output_tree_spec, leaf_count, error) != 0)
+            return -1;
+        if (leaf_count != program.graph.outputs.size())
+        {
+            error = "output treespec leaf count does not match graph outputs";
+            return -1;
+        }
+    }
 
     Graph candidate;
     std::map<std::string, Operand*> values;
@@ -560,6 +648,8 @@ int lower_exported_program(const ExportedProgram& program,
         }
     }
 
+    std::vector<Operand*> flat_outputs;
+    flat_outputs.reserve(program.output_specs.size());
     for (size_t i = 0; i < program.output_specs.size(); i++)
     {
         const ExportedOutputSpec& spec = program.output_specs[i];
@@ -570,12 +660,36 @@ int lower_exported_program(const ExportedProgram& program,
             return -1;
         }
 
-        std::ostringstream output_name;
-        output_name << "pnnx_output_" << i;
-        Operator* op = candidate.new_operator("pnnx.Output", unique_name(output_name.str(), operator_names));
-        Operand* operand = value_it->second;
-        operand->consumers.push_back(op);
-        op->inputs.push_back(operand);
+        flat_outputs.push_back(value_it->second);
+    }
+
+    if (program.output_tree_spec.type != EXPORTED_TREE_SPEC_NONE)
+    {
+        size_t flat_index = 0;
+        Operand* tree_output = 0;
+        if (construct_output_tree(program.output_tree_spec, flat_outputs, flat_index, candidate, operand_names, operator_names, unknown_index, tree_output, error) != 0)
+            return -1;
+        if (flat_index != flat_outputs.size())
+        {
+            error = "output treespec did not consume all graph outputs";
+            return -1;
+        }
+
+        Operator* op = candidate.new_operator("pnnx.Output", unique_name("pnnx_output_0", operator_names));
+        tree_output->consumers.push_back(op);
+        op->inputs.push_back(tree_output);
+    }
+    else
+    {
+        for (size_t i = 0; i < flat_outputs.size(); i++)
+        {
+            std::ostringstream output_name;
+            output_name << "pnnx_output_" << i;
+            Operator* op = candidate.new_operator("pnnx.Output", unique_name(output_name.str(), operator_names));
+            Operand* operand = flat_outputs[i];
+            operand->consumers.push_back(op);
+            op->inputs.push_back(operand);
+        }
     }
 
     graph.ops.swap(candidate.ops);

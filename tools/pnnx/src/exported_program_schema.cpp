@@ -70,6 +70,11 @@ ExportedOutputSpec::ExportedOutputSpec()
     kind = EXPORTED_USER_OUTPUT;
 }
 
+ExportedTreeSpec::ExportedTreeSpec()
+{
+    type = EXPORTED_TREE_SPEC_NONE;
+}
+
 ExportedGraph::ExportedGraph()
 {
     is_single_tensor_return = false;
@@ -1625,6 +1630,150 @@ static int parse_graph_signature(const JsonValue& value, std::vector<ExportedInp
     return parse_output_specs(*outputs, output_specs, path + ".output_specs", error);
 }
 
+static int parse_output_tree_node(const JsonValue& value, ExportedTreeSpec& tree_spec, const std::string& path, ExportedSchemaError& error)
+{
+    if (value.type() != JSON_OBJECT)
+        return schema_error(error, path, "output treespec node must be an object");
+
+    const JsonValue* type = required_field(value, "type", path, error);
+    if (!type)
+        return -1;
+    const JsonValue* context = required_field(value, "context", path, error);
+    if (!context)
+        return -1;
+    const JsonValue* children_spec = required_field(value, "children_spec", path, error);
+    if (!children_spec)
+        return -1;
+    if (children_spec->type() != JSON_ARRAY)
+        return schema_error(error, path, "output treespec children_spec must be an array");
+
+    if (type->type() == JSON_NULL)
+    {
+        if (context->type() != JSON_NULL)
+            return schema_error(error, path, "leaf context must be null");
+        if (!children_spec->as_array().empty())
+            return schema_error(error, path, "leaf must not have children");
+
+        tree_spec.type = EXPORTED_TREE_SPEC_LEAF;
+        return 0;
+    }
+
+    if (type->type() != JSON_STRING)
+        return schema_error(error, path, "output treespec type must be a string or null");
+
+    const std::string& type_name = type->as_string();
+    if (type_name == "builtins.tuple")
+        tree_spec.type = EXPORTED_TREE_SPEC_TUPLE;
+    else if (type_name == "builtins.list")
+        tree_spec.type = EXPORTED_TREE_SPEC_LIST;
+    else
+        return schema_error(error, path, "unsupported output treespec type " + type_name);
+
+    if (context->type() != JSON_STRING || context->as_string() != "null")
+        return schema_error(error, path, "container context must be the string null");
+
+    const std::vector<JsonValue>& children = children_spec->as_array();
+    tree_spec.children.reserve(children.size());
+    for (size_t i = 0; i < children.size(); i++)
+    {
+        ExportedTreeSpec child;
+        if (parse_output_tree_node(children[i], child, path, error) != 0)
+            return -1;
+        tree_spec.children.push_back(child);
+    }
+
+    return 0;
+}
+
+static int parse_serialized_output_tree(const std::string& serialized, ExportedTreeSpec& tree_spec, const std::string& path, ExportedSchemaError& error)
+{
+    JsonValue value;
+    JsonParseError parse_error;
+    JsonParseOptions options;
+    if (parse_json(serialized.data(), serialized.size(), value, parse_error, options) != 0)
+    {
+        std::ostringstream message;
+        message << "invalid output treespec JSON at byte " << parse_error.byte_offset << ": " << parse_error.message;
+        return schema_error(error, path, message.str());
+    }
+
+    if (value.type() != JSON_ARRAY || value.as_array().size() != 2)
+        return schema_error(error, path, "output treespec must be a protocol and tree pair");
+
+    const JsonValue& protocol = value.as_array()[0];
+    if (protocol.type() != JSON_INT64)
+        return schema_error(error, path, "output treespec protocol must be an integer");
+    if (protocol.as_int64() != 1)
+    {
+        std::ostringstream message;
+        message << "unsupported output treespec protocol " << protocol.as_int64();
+        return schema_error(error, path, message.str());
+    }
+
+    return parse_output_tree_node(value.as_array()[1], tree_spec, path, error);
+}
+
+static int parse_module_call_graph(const JsonValue& value, ExportedTreeSpec& output_tree_spec, std::string& output_tree_path, const std::string& path, ExportedSchemaError& error)
+{
+    if (value.type() != JSON_ARRAY)
+        return schema_error(error, path, "expected array");
+
+    bool found_root = false;
+    const std::vector<JsonValue>& entries = value.as_array();
+    for (size_t i = 0; i < entries.size(); i++)
+    {
+        std::ostringstream entry_path_stream;
+        entry_path_stream << path << '[' << i << ']';
+        const std::string entry_path = entry_path_stream.str();
+
+        if (entries[i].type() != JSON_OBJECT)
+            return schema_error(error, entry_path, "expected object");
+
+        const JsonValue* fqn = required_field(entries[i], "fqn", entry_path, error);
+        if (!fqn)
+            return -1;
+        if (fqn->type() != JSON_STRING)
+            return schema_error(error, entry_path + ".fqn", "expected string");
+        if (!fqn->as_string().empty())
+            continue;
+
+        if (found_root)
+            return schema_error(error, entry_path + ".fqn", "duplicate root module entry");
+        found_root = true;
+
+        const JsonValue* signature = required_field(entries[i], "signature", entry_path, error);
+        if (!signature)
+            return -1;
+        if (signature->type() == JSON_NULL)
+            return schema_error(error, entry_path + ".signature", "root module signature is required");
+        if (signature->type() != JSON_OBJECT)
+            return schema_error(error, entry_path + ".signature", "expected object");
+
+        const JsonValue* out_spec = required_field(*signature, "out_spec", entry_path + ".signature", error);
+        if (!out_spec)
+            return -1;
+        std::string serialized;
+        output_tree_path = entry_path + ".signature.out_spec";
+        if (read_string(*out_spec, serialized, output_tree_path, error) != 0)
+            return -1;
+        if (parse_serialized_output_tree(serialized, output_tree_spec, output_tree_path, error) != 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+static size_t output_tree_leaf_count(const ExportedTreeSpec& tree_spec)
+{
+    if (tree_spec.type == EXPORTED_TREE_SPEC_LEAF)
+        return 1;
+
+    size_t count = 0;
+    for (size_t i = 0; i < tree_spec.children.size(); i++)
+        count += output_tree_leaf_count(tree_spec.children[i]);
+    return count;
+}
+
 static int validate_signature_tensor_arguments(const ExportedProgram& program, ExportedSchemaError& error)
 {
     const std::string tensor_values_path = "$.graph_module.graph.tensor_values";
@@ -1675,8 +1824,9 @@ int parse_exported_program(const JsonValue& value, ExportedProgram& program, Exp
     const JsonValue* module_call_graph = required_field(*graph_module, "module_call_graph", "$.graph_module", error);
     if (!module_call_graph)
         return -1;
-    if (module_call_graph->type() != JSON_ARRAY)
-        return schema_error(error, "$.graph_module.module_call_graph", "expected array");
+    std::string output_tree_path;
+    if (parse_module_call_graph(*module_call_graph, parsed_program.output_tree_spec, output_tree_path, "$.graph_module.module_call_graph", error) != 0)
+        return -1;
 
     const JsonValue* range_constraints = required_field(value, "range_constraints", "$", error);
     if (!range_constraints)
@@ -1690,6 +1840,8 @@ int parse_exported_program(const JsonValue& value, ExportedProgram& program, Exp
         return schema_error(error, "$.graph_module.signature.input_specs", "input spec count does not match graph inputs");
     if (parsed_program.output_specs.size() != parsed_program.graph.outputs.size())
         return schema_error(error, "$.graph_module.signature.output_specs", "output spec count does not match graph outputs");
+    if (parsed_program.output_tree_spec.type != EXPORTED_TREE_SPEC_NONE && output_tree_leaf_count(parsed_program.output_tree_spec) != parsed_program.graph.outputs.size())
+        return schema_error(error, output_tree_path, "output treespec leaf count does not match graph outputs");
     if (validate_signature_tensor_arguments(parsed_program, error) != 0)
         return -1;
 

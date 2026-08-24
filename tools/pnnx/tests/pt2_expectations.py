@@ -387,7 +387,7 @@ PT2_EXPECTATIONS = {
     "test_transformers_funnel_attention": (PT2_FRONTEND_UNSUPPORTED, "dynamic tensor metadata is unsupported"),
     "test_transformers_gpt2_attention": (PASS, ""),
     "test_transformers_layoutlm_attention": (PASS, ""),
-    "test_transformers_longformer_attention": (NUMERICAL_MISMATCH, "output mismatch"),
+    "test_transformers_longformer_attention": (PASS, ""),
     "test_transformers_lxmert_attention": (PASS, ""),
     "test_transformers_m2m_100_attention": (PASS, ""),
     "test_transformers_marian_attention": (PASS, ""),

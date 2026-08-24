@@ -64,6 +64,27 @@ static std::string tensor_argument_json(const std::string& name)
     return "{\"as_tensor\":{\"name\":\"" + name + "\"}}";
 }
 
+static std::string json_string(const std::string& value)
+{
+    std::string result = "\"";
+    for (size_t i = 0; i < value.size(); i++)
+    {
+        const char ch = value[i];
+        if (ch == '"' || ch == '\\')
+            result.push_back('\\');
+        result.push_back(ch);
+    }
+    result.push_back('"');
+    return result;
+}
+
+static std::string module_call_graph_json(const std::string& out_spec)
+{
+    const std::string leaf = "[1,{\"type\":null,\"context\":null,\"children_spec\":[]}]";
+    return "[{\"fqn\":\"\",\"signature\":{\"inputs\":[],\"outputs\":[],\"in_spec\":" + json_string(leaf)
+           + ",\"out_spec\":" + json_string(out_spec) + ",\"forward_arg_names\":[\"x\"]}}]";
+}
+
 struct ProgramFixture
 {
     ProgramFixture()
@@ -80,7 +101,7 @@ struct ProgramFixture
           is_single_tensor_return("false"),
           input_specs("[{\"user_input\":{\"arg\":" + tensor_argument_json("x") + "}}]"),
           output_specs("[{\"user_output\":{\"arg\":" + tensor_argument_json("y") + "}}]"),
-          module_call_graph("[]"),
+          module_call_graph(module_call_graph_json("[1,{\"type\":null,\"context\":null,\"children_spec\":[]}]")),
           range_constraints("{}")
     {
     }
@@ -754,6 +775,77 @@ static void test_graph_signatures()
         check(program.output_specs[0].kind == pnnx::EXPORTED_OUTPUT_TOKEN && program.output_specs[0].arg.name == "token1", "signature token output", "token output changed");
 }
 
+static void test_output_tree_specs()
+{
+    ProgramFixture fixture;
+    pnnx::ExportedProgram program;
+    if (parse_program_fixture(fixture, program, "output treespec leaf"))
+    {
+        check(program.output_tree_spec.type == pnnx::EXPORTED_TREE_SPEC_LEAF, "output treespec leaf", "leaf type changed");
+        check(program.output_tree_spec.children.empty(), "output treespec leaf", "leaf has children");
+    }
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = "[]";
+    if (parse_program_fixture(fixture, program, "output treespec legacy flat"))
+        check(program.output_tree_spec.type == pnnx::EXPORTED_TREE_SPEC_NONE, "output treespec legacy flat", "missing root did not preserve flat outputs");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("[1,{\"type\":\"builtins.tuple\",\"context\":\"null\",\"children_spec\":[{\"type\":null,\"context\":null,\"children_spec\":[]}]}]");
+    if (parse_program_fixture(fixture, program, "output treespec one tuple"))
+    {
+        check(program.output_tree_spec.type == pnnx::EXPORTED_TREE_SPEC_TUPLE, "output treespec one tuple", "tuple type changed");
+        check(program.output_tree_spec.children.size() == 1 && program.output_tree_spec.children[0].type == pnnx::EXPORTED_TREE_SPEC_LEAF, "output treespec one tuple", "tuple child changed");
+    }
+
+    fixture = ProgramFixture();
+    fixture.graph_outputs = "[" + tensor_argument_json("y") + "," + tensor_argument_json("y") + "," + tensor_argument_json("y") + "]";
+    fixture.output_specs = "[{\"user_output\":{\"arg\":" + tensor_argument_json("y") + "}},{\"user_output\":{\"arg\":" + tensor_argument_json("y") + "}},{\"user_output\":{\"arg\":" + tensor_argument_json("y") + "}}]";
+    fixture.module_call_graph = module_call_graph_json("[1,{\"type\":\"builtins.tuple\",\"context\":\"null\",\"children_spec\":[{\"type\":null,\"context\":null,\"children_spec\":[]},{\"type\":\"builtins.list\",\"context\":\"null\",\"children_spec\":[{\"type\":null,\"context\":null,\"children_spec\":[]},{\"type\":null,\"context\":null,\"children_spec\":[]}]}]}]");
+    if (parse_program_fixture(fixture, program, "output treespec nested"))
+    {
+        check(program.output_tree_spec.type == pnnx::EXPORTED_TREE_SPEC_TUPLE && program.output_tree_spec.children.size() == 2, "output treespec nested", "outer tuple changed");
+        check(program.output_tree_spec.children.size() == 2 && program.output_tree_spec.children[1].type == pnnx::EXPORTED_TREE_SPEC_LIST && program.output_tree_spec.children[1].children.size() == 2, "output treespec nested", "nested list changed");
+    }
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = "[{\"fqn\":\"\",\"signature\":{\"out_spec\":7}}]";
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature.out_spec", "expected string", "output treespec string type");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("not-json");
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature.out_spec", "invalid output treespec JSON", "output treespec invalid json");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("[2,{\"type\":null,\"context\":null,\"children_spec\":[]}]");
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature.out_spec", "unsupported output treespec protocol 2", "output treespec protocol");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("[1,{\"type\":\"builtins.dict\",\"context\":\"[]\",\"children_spec\":[]}]");
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature.out_spec", "unsupported output treespec type builtins.dict", "output treespec unsupported type");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("[1,{\"type\":\"builtins.tuple\",\"context\":null,\"children_spec\":[]}]");
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature.out_spec", "container context must be the string null", "output treespec tuple context");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("[1,{\"type\":null,\"context\":null,\"children_spec\":[{\"type\":null,\"context\":null,\"children_spec\":[]}]}]");
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature.out_spec", "leaf must not have children", "output treespec leaf children");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = "[{\"fqn\":\"\",\"signature\":null}]";
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature", "root module signature is required", "output treespec root signature");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("[1,{\"type\":null,\"context\":null,\"children_spec\":[]}]");
+    fixture.module_call_graph.insert(fixture.module_call_graph.size() - 1, ",{\"fqn\":\"\",\"signature\":null}");
+    expect_program_error(fixture, "$.graph_module.module_call_graph[1].fqn", "duplicate root module entry", "output treespec duplicate root");
+
+    fixture = ProgramFixture();
+    fixture.module_call_graph = module_call_graph_json("[1,{\"type\":\"builtins.tuple\",\"context\":\"null\",\"children_spec\":[{\"type\":null,\"context\":null,\"children_spec\":[]},{\"type\":null,\"context\":null,\"children_spec\":[]}]}]");
+    expect_program_error(fixture, "$.graph_module.module_call_graph[0].signature.out_spec", "leaf count does not match graph outputs", "output treespec leaf count");
+}
+
 static void test_program_errors()
 {
     ProgramFixture fixture;
@@ -993,6 +1085,7 @@ int main(int argc, char** argv)
     test_tiny_program();
     test_graph_arguments();
     test_graph_signatures();
+    test_output_tree_specs();
     test_program_errors();
 
     if (test_failures != 0)

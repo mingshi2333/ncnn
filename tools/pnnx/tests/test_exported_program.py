@@ -31,6 +31,15 @@ class TinyModel(torch.nn.Module):
         return torch.relu(self.linear(x))
 
 
+class SingleTupleModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 3)
+
+    def forward(self, x):
+        return (torch.relu(self.linear(x)),)
+
+
 class BufferLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -206,6 +215,30 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
             traced.save(str(torchscript_path))
 
             self.assert_conversion_matches(work_dir, torchscript_path)
+
+    def test_single_tensor_tuple_output_preserves_structure(self):
+        torch.manual_seed(42)
+        model = SingleTupleModel().eval()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+            archive_path = work_dir / "single_tuple.pt2"
+            save_exported_program(model, archive_path)
+
+            result = run_pnnx(work_dir, archive_path)
+            self.assertEqual(
+                result.returncode,
+                0,
+                result.stderr.decode(errors="replace"),
+            )
+
+            actual = load_generated_output(work_dir, archive_path.stem)
+            expected = expected_output(model)
+            self.assertIsInstance(actual, tuple)
+            self.assertEqual(len(actual), 1)
+            self.assertTrue(
+                torch.allclose(expected[0], actual[0], rtol=1e-4, atol=1e-4)
+            )
 
     def test_persistent_buffer_uses_weights_payload(self):
         model = BufferLinearModel().eval()

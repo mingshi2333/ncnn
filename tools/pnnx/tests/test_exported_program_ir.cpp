@@ -127,6 +127,21 @@ static pnnx::ExportedArgument make_device(const std::string& type, int64_t index
     return argument;
 }
 
+static pnnx::ExportedTreeSpec make_output_leaf()
+{
+    pnnx::ExportedTreeSpec spec;
+    spec.type = pnnx::EXPORTED_TREE_SPEC_LEAF;
+    return spec;
+}
+
+static pnnx::ExportedTreeSpec make_output_tree(pnnx::ExportedTreeSpecType type, const std::vector<pnnx::ExportedTreeSpec>& children)
+{
+    pnnx::ExportedTreeSpec spec;
+    spec.type = type;
+    spec.children = children;
+    return spec;
+}
+
 static pnnx::ExportedNamedArgument make_input(const std::string& name, const std::string& tensor_name)
 {
     pnnx::ExportedNamedArgument input;
@@ -706,6 +721,11 @@ static int count_operator(const pnnx::Graph& graph, const std::string& type)
     return count;
 }
 
+static void expect_lower_error(const pnnx::ExportedProgram& program,
+                               const std::map<std::string, pnnx::MaterializedExportedTensor>& state,
+                               const std::string& expected_error,
+                               const char* name);
+
 static void test_linear_relu_graph()
 {
     const pnnx::ExportedProgram program = make_linear_relu_program();
@@ -753,6 +773,60 @@ static void test_linear_relu_graph()
     pnnx::pass_level2(graph);
     check(count_operator(graph, "aten::linear") == 0 && count_operator(graph, "F.linear") == 1, "linear relu pass level2", "linear was not canonicalized");
     check(count_operator(graph, "aten::relu") == 0 && count_operator(graph, "F.relu") == 1, "linear relu pass level2", "relu was not canonicalized");
+}
+
+static void test_output_tree_lowering()
+{
+    {
+        pnnx::ExportedProgram program = make_linear_relu_program();
+        program.output_tree_spec = make_output_leaf();
+
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, make_linear_state(), graph, error);
+
+        check(result == 0, "output tree leaf", error);
+        check(result == 0 && count_operator(graph, "prim::TupleConstruct") == 0 && count_operator(graph, "pnnx.Output") == 1, "output tree leaf", "leaf output graph changed");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_linear_relu_program();
+        program.output_tree_spec = make_output_tree(pnnx::EXPORTED_TREE_SPEC_TUPLE, std::vector<pnnx::ExportedTreeSpec>(1, make_output_leaf()));
+
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, make_linear_state(), graph, error);
+
+        check(result == 0, "output tree one tuple", error);
+        pnnx::Operator* tuple = find_operator(graph, "prim::TupleConstruct");
+        pnnx::Operator* output = find_operator(graph, "pnnx.Output");
+        check(tuple && tuple->inputs.size() == 1 && tuple->inputs[0]->name == "relu" && tuple->outputs.size() == 1, "output tree one tuple", "tuple construct wiring changed");
+        check(tuple && output && output->inputs.size() == 1 && tuple->outputs[0] == output->inputs[0], "output tree one tuple", "tuple output wiring changed");
+        check(count_operator(graph, "pnnx.Output") == 1, "output tree one tuple", "tuple produced multiple graph outputs");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_linear_relu_program();
+        const pnnx::ExportedTreeSpec list = make_output_tree(pnnx::EXPORTED_TREE_SPEC_LIST, std::vector<pnnx::ExportedTreeSpec>(1, make_output_leaf()));
+        program.output_tree_spec = make_output_tree(pnnx::EXPORTED_TREE_SPEC_TUPLE, std::vector<pnnx::ExportedTreeSpec>(1, list));
+
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, make_linear_state(), graph, error);
+
+        check(result == 0, "output tree nested", error);
+        pnnx::Operator* list_construct = find_operator(graph, "prim::ListConstruct");
+        pnnx::Operator* tuple_construct = find_operator(graph, "prim::TupleConstruct");
+        pnnx::Operator* output = find_operator(graph, "pnnx.Output");
+        check(list_construct && tuple_construct && list_construct->outputs.size() == 1 && tuple_construct->inputs.size() == 1 && tuple_construct->inputs[0] == list_construct->outputs[0], "output tree nested", "nested container wiring changed");
+        check(tuple_construct && output && output->inputs.size() == 1 && output->inputs[0] == tuple_construct->outputs[0], "output tree nested", "nested output wiring changed");
+    }
+
+    {
+        pnnx::ExportedProgram program = make_linear_relu_program();
+        program.output_tree_spec = make_output_tree(pnnx::EXPORTED_TREE_SPEC_TUPLE, std::vector<pnnx::ExportedTreeSpec>(2, make_output_leaf()));
+        expect_lower_error(program, make_linear_state(), "output treespec leaf count does not match graph outputs", "output tree leaf mismatch");
+    }
 }
 
 static void test_linear_default_bias_constant()
@@ -2235,6 +2309,7 @@ int main(int argc, char** argv)
         return 2;
 
     test_linear_relu_graph();
+    test_output_tree_lowering();
     test_linear_default_bias_constant();
     test_conv2d_constant_arguments();
     test_conv_nd_direct_lowering();
