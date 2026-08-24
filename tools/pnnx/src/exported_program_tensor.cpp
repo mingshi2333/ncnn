@@ -145,7 +145,12 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
         return -1;
     }
 
-    if (meta.storage_offset < 0)
+    if (meta.storage_offset.type != EXPORTED_SYM_INT_STATIC)
+    {
+        error = "symbolic storage offset cannot be materialized";
+        return -1;
+    }
+    if (meta.storage_offset.value < 0)
     {
         error = "negative storage offset";
         return -1;
@@ -158,21 +163,35 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
     bool has_zero_dimension = false;
     for (size_t i = 0; i < meta.sizes.size(); i++)
     {
-        if (meta.sizes[i] < 0)
+        if (meta.sizes[i].type != EXPORTED_SYM_INT_STATIC)
+        {
+            std::ostringstream message;
+            message << "symbolic tensor size at dimension " << i << " cannot be materialized";
+            error = message.str();
+            return -1;
+        }
+        if (meta.sizes[i].value < 0)
         {
             std::ostringstream message;
             message << "negative tensor size at dimension " << i;
             error = message.str();
             return -1;
         }
-        if (meta.sizes[i] > INT_MAX)
+        if (meta.sizes[i].value > INT_MAX)
         {
             std::ostringstream message;
             message << "tensor size at dimension " << i << " does not fit pnnx shape";
             error = message.str();
             return -1;
         }
-        if (meta.strides[i] < 0)
+        if (meta.strides[i].type != EXPORTED_SYM_INT_STATIC)
+        {
+            std::ostringstream message;
+            message << "symbolic tensor stride at dimension " << i << " cannot be materialized";
+            error = message.str();
+            return -1;
+        }
+        if (meta.strides[i].value < 0)
         {
             std::ostringstream message;
             message << "negative tensor stride at dimension " << i;
@@ -180,8 +199,8 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
             return -1;
         }
 
-        parsed_tensor.shape.push_back((int)meta.sizes[i]);
-        has_zero_dimension = has_zero_dimension || meta.sizes[i] == 0;
+        parsed_tensor.shape.push_back((int)meta.sizes[i].value);
+        has_zero_dimension = has_zero_dimension || meta.sizes[i].value == 0;
     }
 
     if (storage.size() % dtype_info.element_size != 0)
@@ -191,7 +210,7 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
     }
 
     const uint64_t storage_element_count = (uint64_t)(storage.size() / dtype_info.element_size);
-    const uint64_t storage_offset = (uint64_t)meta.storage_offset;
+    const uint64_t storage_offset = (uint64_t)meta.storage_offset.value;
     if (has_zero_dimension)
     {
         if (storage_offset > storage_element_count)
@@ -209,7 +228,7 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
     for (size_t i = 0; i < meta.sizes.size(); i++)
     {
         uint64_t next_count = 0;
-        if (!checked_multiply(element_count, (uint64_t)meta.sizes[i], next_count))
+        if (!checked_multiply(element_count, (uint64_t)meta.sizes[i].value, next_count))
         {
             error = "tensor element count overflow";
             return -1;
@@ -227,7 +246,7 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
     for (size_t i = 0; i < meta.sizes.size(); i++)
     {
         uint64_t dimension_offset = 0;
-        if (!checked_multiply((uint64_t)(meta.sizes[i] - 1), (uint64_t)meta.strides[i], dimension_offset)
+        if (!checked_multiply((uint64_t)(meta.sizes[i].value - 1), (uint64_t)meta.strides[i].value, dimension_offset)
             || !checked_add(maximum_source_offset, dimension_offset, maximum_source_offset))
         {
             error = "tensor view offset overflow";
@@ -279,11 +298,11 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
     for (size_t reverse_i = meta.sizes.size(); reverse_i > 0; reverse_i--)
     {
         const size_t i = reverse_i - 1;
-        if (meta.sizes[i] > 1 && (uint64_t)meta.strides[i] != expected_stride)
+        if (meta.sizes[i].value > 1 && (uint64_t)meta.strides[i].value != expected_stride)
             is_contiguous = false;
 
         uint64_t next_stride = 0;
-        if (!checked_multiply(expected_stride, (uint64_t)meta.sizes[i], next_stride))
+        if (!checked_multiply(expected_stride, (uint64_t)meta.sizes[i].value, next_stride))
         {
             error = "tensor contiguous stride overflow";
             return -1;
@@ -303,7 +322,7 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
         {
             uint64_t source_index = storage_offset;
             for (size_t i = 0; i < coordinate.size(); i++)
-                source_index += coordinate[i] * (uint64_t)meta.strides[i];
+                source_index += coordinate[i] * (uint64_t)meta.strides[i].value;
 
             const size_t source_byte = (size_t)(source_index * dtype_info.element_size);
             const size_t destination_byte = (size_t)(output_index * dtype_info.element_size);
@@ -313,7 +332,7 @@ int materialize_exported_tensor(const ExportedTensorMeta& meta,
             {
                 const size_t i = reverse_i - 1;
                 coordinate[i]++;
-                if (coordinate[i] < (uint64_t)meta.sizes[i])
+                if (coordinate[i] < (uint64_t)meta.sizes[i].value)
                     break;
                 coordinate[i] = 0;
             }

@@ -102,6 +102,14 @@ static pnnx::ExportedArgument make_int(int64_t value)
     return argument;
 }
 
+static pnnx::ExportedArgument make_symbolic(pnnx::ExportedArgumentType type, const std::string& name)
+{
+    pnnx::ExportedArgument argument;
+    argument.type = type;
+    argument.name = name;
+    return argument;
+}
+
 static pnnx::ExportedArgument make_ints(const std::vector<int64_t>& values)
 {
     pnnx::ExportedArgument argument;
@@ -173,7 +181,8 @@ static pnnx::ExportedTensorMeta make_tensor_meta(const std::vector<int64_t>& siz
 {
     pnnx::ExportedTensorMeta meta;
     meta.dtype = 7;
-    meta.sizes = sizes;
+    for (size_t i = 0; i < sizes.size(); i++)
+        meta.sizes.push_back(pnnx::ExportedSymInt(sizes[i]));
     meta.strides.resize(sizes.size());
     int64_t stride = 1;
     for (size_t reverse_i = sizes.size(); reverse_i > 0; reverse_i--)
@@ -269,6 +278,121 @@ static pnnx::ExportedProgram make_linear_relu_program()
     pnnx::ExportedOutputSpec output;
     output.kind = pnnx::EXPORTED_USER_OUTPUT;
     output.arg = make_tensor("relu");
+    program.output_specs.push_back(output);
+
+    return program;
+}
+
+static pnnx::ExportedProgram make_bounded_dynamic_result_program(bool legacy_range_node = false)
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = legacy_range_node ? 14 : 20;
+    program.header.torch_version = legacy_range_node ? "2.9.1" : "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode gt;
+    gt.name = "gt";
+    gt.has_name = true;
+    gt.target = "torch.ops.aten.gt.Scalar";
+    gt.inputs.push_back(make_input("self", "x"));
+    gt.inputs.push_back(make_input("other", make_float(0.5)));
+    gt.outputs.push_back(make_tensor("mask"));
+    program.graph.nodes.push_back(gt);
+
+    pnnx::ExportedNode masked_select;
+    masked_select.name = "masked_select";
+    masked_select.has_name = true;
+    masked_select.target = "torch.ops.aten.masked_select.default";
+    masked_select.inputs.push_back(make_input("self", "x"));
+    masked_select.inputs.push_back(make_input("mask", "mask"));
+    masked_select.outputs.push_back(make_tensor("selected"));
+    program.graph.nodes.push_back(masked_select);
+
+    pnnx::ExportedNode sym_size;
+    sym_size.name = "sym_size_int";
+    sym_size.has_name = true;
+    sym_size.target = "torch.ops.aten.sym_size.int";
+    sym_size.inputs.push_back(make_input("self", "selected"));
+    sym_size.inputs.push_back(make_input("dim", make_int(0)));
+    sym_size.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sym_size_int"));
+    program.graph.nodes.push_back(sym_size);
+
+    if (legacy_range_node)
+    {
+        pnnx::ExportedNode constrain_range;
+        constrain_range.target = "torch.ops.aten.sym_constrain_range_for_size.default";
+        constrain_range.inputs.push_back(make_input("size", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sym_size_int")));
+        program.graph.nodes.push_back(constrain_range);
+    }
+
+    pnnx::ExportedNode ge;
+    ge.name = "ge";
+    ge.has_name = true;
+    ge.target = "_operator.ge";
+    ge.inputs.push_back(make_input("a", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT, "sym_size_int")));
+    ge.inputs.push_back(make_input("b", make_int(0)));
+    ge.outputs.push_back(make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "ge"));
+    program.graph.nodes.push_back(ge);
+
+    pnnx::ExportedNode assert_min;
+    assert_min.name = "assert_min";
+    assert_min.has_name = true;
+    assert_min.target = "torch.ops.aten._assert_scalar.default";
+    assert_min.inputs.push_back(make_input("self", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "ge")));
+    assert_min.inputs.push_back(make_input("assert_msg", make_string("Runtime assertion failed for expression u0 >= 0")));
+    program.graph.nodes.push_back(assert_min);
+
+    pnnx::ExportedNode le = ge;
+    le.name = "le";
+    le.target = "_operator.le";
+    le.inputs[1] = make_input("b", make_int(48));
+    le.outputs[0] = make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "le");
+    program.graph.nodes.push_back(le);
+
+    pnnx::ExportedNode assert_max = assert_min;
+    assert_max.name = "assert_max";
+    assert_max.inputs[0] = make_input("self", make_symbolic(pnnx::EXPORTED_ARGUMENT_SYMBOLIC_BOOL, "le"));
+    assert_max.inputs[1] = make_input("assert_msg", make_string("Runtime assertion failed for expression u0 <= 48"));
+    program.graph.nodes.push_back(assert_max);
+
+    program.graph.outputs.push_back(make_tensor("selected"));
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 3, 16});
+    program.graph.tensor_values["mask"] = make_tensor_meta(std::vector<int64_t>{1, 3, 16});
+    program.graph.tensor_values["mask"].dtype = 12;
+    program.graph.tensor_values["selected"] = make_tensor_meta(std::vector<int64_t>{1});
+    program.graph.tensor_values["selected"].sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    program.graph.tensor_values["selected"].sizes[0].expression = "Symbol('u0', integer=True)";
+
+    pnnx::ExportedSymInt sym_int;
+    sym_int.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    sym_int.expression = "Symbol('u0', integer=True)";
+    program.graph.sym_int_values["sym_size_int"] = sym_int;
+
+    pnnx::ExportedSymBool sym_bool;
+    sym_bool.is_expression = true;
+    sym_bool.expression = "GreaterThan(Symbol('u0', integer=True), Integer(0))";
+    program.graph.sym_bool_values["ge"] = sym_bool;
+    sym_bool.expression = "LessThan(Symbol('u0', integer=True), Integer(48))";
+    program.graph.sym_bool_values["le"] = sym_bool;
+
+    pnnx::ExportedRangeConstraint constraint;
+    constraint.has_min = true;
+    constraint.min = 0;
+    constraint.has_max = true;
+    constraint.max = 48;
+    program.range_constraints["u0"] = constraint;
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("selected");
     program.output_specs.push_back(output);
 
     return program;
@@ -884,6 +1008,44 @@ static void test_linear_relu_graph()
     pnnx::pass_level2(graph);
     check(count_operator(graph, "aten::linear") == 0 && count_operator(graph, "F.linear") == 1, "linear relu pass level2", "linear was not canonicalized");
     check(count_operator(graph, "aten::relu") == 0 && count_operator(graph, "F.relu") == 1, "linear relu pass level2", "relu was not canonicalized");
+}
+
+static void test_bounded_dynamic_result_shape()
+{
+    const pnnx::ExportedProgram program = make_bounded_dynamic_result_program();
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+    check(result == 0, "bounded dynamic result", "lowering failed: " + error);
+    check(error.empty(), "bounded dynamic result", "success retained an error");
+    if (result == 0)
+    {
+        check(count_operator(graph, "aten::sym_size") == 0 && count_operator(graph, "aten::_assert_scalar") == 0, "bounded dynamic result", "shape constraint nodes were retained");
+        pnnx::Operand* selected = graph.get_operand("selected");
+        check(selected && selected->shape == std::vector<int>({48}), "bounded dynamic result", "finite upper bound was not used as output shape");
+        check(selected && selected->producer && selected->producer->type == "aten::masked_select", "bounded dynamic result", "masked_select producer changed");
+    }
+
+    pnnx::ExportedProgram missing_bound = make_bounded_dynamic_result_program();
+    missing_bound.range_constraints.clear();
+    expect_lower_error(missing_bound, std::map<std::string, pnnx::MaterializedExportedTensor>(), "symbolic size u0 has no finite upper bound", "dynamic result missing bound");
+
+    pnnx::ExportedProgram complex_expression = make_bounded_dynamic_result_program();
+    complex_expression.graph.tensor_values["selected"].sizes[0].expression = "Add(Symbol('u0', integer=True), Integer(1))";
+    expect_lower_error(complex_expression, std::map<std::string, pnnx::MaterializedExportedTensor>(), "unsupported symbolic size Add", "dynamic result complex expression");
+
+    pnnx::ExportedProgram oversized_bound = make_bounded_dynamic_result_program();
+    oversized_bound.range_constraints["u0"].max = (int64_t)INT_MAX + 1;
+    expect_lower_error(oversized_bound, std::map<std::string, pnnx::MaterializedExportedTensor>(), "upper bound does not fit pnnx", "dynamic result oversized bound");
+
+    const pnnx::ExportedProgram legacy_program = make_bounded_dynamic_result_program(true);
+    pnnx::Graph legacy_graph;
+    error = "stale";
+    const int legacy_result = pnnx::lower_exported_program(legacy_program, std::map<std::string, pnnx::MaterializedExportedTensor>(), legacy_graph, error);
+    check(legacy_result == 0, "bounded dynamic result schema 8.14", "lowering failed: " + error);
+    check(error.empty(), "bounded dynamic result schema 8.14", "success retained an error");
+    check(legacy_result == 0 && count_operator(legacy_graph, "aten::sym_constrain_range_for_size") == 0, "bounded dynamic result schema 8.14", "legacy range constraint node was retained");
 }
 
 static void test_higher_order_graph_lowering()
@@ -2297,7 +2459,7 @@ static void test_reject_invalid_graph_definitions()
     {
         pnnx::ExportedProgram program = make_linear_relu_program();
         program.graph.tensor_values["x"].sizes[0] = -1;
-        expect_lower_error(program, make_linear_state(), "tensor x has a negative or symbolic size at dimension 0", "negative tensor size");
+        expect_lower_error(program, make_linear_state(), "tensor x has a negative size at dimension 0", "negative tensor size");
     }
 
     {
@@ -2482,12 +2644,12 @@ static int inspect_package(const char* path)
         tensor.pnnx_type = 1;
         for (size_t j = 0; j < meta_it->second.sizes.size(); j++)
         {
-            if (meta_it->second.sizes[j] < 0 || meta_it->second.sizes[j] > INT_MAX)
+            if (meta_it->second.sizes[j].type != pnnx::EXPORTED_SYM_INT_STATIC || meta_it->second.sizes[j].value < 0 || meta_it->second.sizes[j].value > INT_MAX)
             {
                 fprintf(stderr, "real linear fixture shape is out of range\n");
                 return 1;
             }
-            tensor.shape.push_back((int)meta_it->second.sizes[j]);
+            tensor.shape.push_back((int)meta_it->second.sizes[j].value);
         }
         state[spec.target] = tensor;
     }
@@ -2525,6 +2687,7 @@ int main(int argc, char** argv)
         return 2;
 
     test_linear_relu_graph();
+    test_bounded_dynamic_result_shape();
     test_higher_order_graph_lowering();
     test_complex_scalar_lowering();
     test_output_tree_lowering();

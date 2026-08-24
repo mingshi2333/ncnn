@@ -235,6 +235,8 @@ static int append_higher_order_graph(const ExportedNode& node,
     const ExportedGraph& subgraph = *graph_argument.graph_value;
     if (!subgraph.custom_obj_values.empty())
         return graph_error(node, "higher-order subgraph custom objects are unsupported", error);
+    if (!subgraph.sym_int_values.empty() || !subgraph.sym_bool_values.empty() || !subgraph.sym_float_values.empty())
+        return graph_error(node, "higher-order subgraph symbolic values are unsupported", error);
     if (subgraph.inputs.size() != node.inputs.size() - capture_index)
         return graph_error(node, "captured argument count does not match subgraph input count", error);
     if (subgraph.outputs.size() != node.outputs.size())
@@ -282,6 +284,7 @@ static int append_normalized_nodes(const ExportedGraph& source,
                                    std::string& error)
 {
     static const std::string higher_order_prefix = "torch.ops.higher_order.";
+    static const std::string runtime_assert_prefix = "Runtime assertion failed for expression ";
 
     for (size_t i = 0; i < source.nodes.size(); i++)
     {
@@ -290,6 +293,45 @@ static int append_normalized_nodes(const ExportedGraph& source,
         {
             if (!node.outputs.empty())
                 return graph_error(node, "tensor metadata assertion must not produce outputs", error);
+            continue;
+        }
+
+        if (node.target == "torch.ops.aten.sym_size.int"
+            && node.inputs.size() == 2
+            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_TENSOR
+            && node.inputs[1].arg.type == EXPORTED_ARGUMENT_INT
+            && node.outputs.size() == 1
+            && node.outputs[0].type == EXPORTED_ARGUMENT_SYMBOLIC_INT)
+        {
+            continue;
+        }
+
+        if (node.target == "torch.ops.aten.sym_constrain_range_for_size.default"
+            && node.inputs.size() == 1
+            && node.inputs[0].name == "size"
+            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
+            && node.outputs.empty())
+        {
+            continue;
+        }
+
+        if ((node.target == "_operator.ge" || node.target == "_operator.le")
+            && node.inputs.size() == 2
+            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_INT
+            && node.inputs[1].arg.type == EXPORTED_ARGUMENT_INT
+            && node.outputs.size() == 1
+            && node.outputs[0].type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL)
+        {
+            continue;
+        }
+
+        if (node.target == "torch.ops.aten._assert_scalar.default"
+            && node.inputs.size() == 2
+            && node.inputs[0].arg.type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL
+            && node.inputs[1].arg.type == EXPORTED_ARGUMENT_STRING
+            && node.inputs[1].arg.string_value.compare(0, runtime_assert_prefix.size(), runtime_assert_prefix) == 0
+            && node.outputs.empty())
+        {
             continue;
         }
 
@@ -326,6 +368,9 @@ int normalize_exported_program_graph(const ExportedGraph& graph, ExportedGraph& 
     candidate.inputs = graph.inputs;
     candidate.outputs = graph.outputs;
     candidate.tensor_values = graph.tensor_values;
+    candidate.sym_int_values = graph.sym_int_values;
+    candidate.sym_bool_values = graph.sym_bool_values;
+    candidate.sym_float_values = graph.sym_float_values;
     candidate.custom_obj_values = graph.custom_obj_values;
     candidate.is_single_tensor_return = graph.is_single_tensor_return;
 

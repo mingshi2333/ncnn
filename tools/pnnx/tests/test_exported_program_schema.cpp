@@ -319,9 +319,9 @@ static void expect_tensor(const std::string& text, const std::string& label)
 
     check(error.path.empty() && error.message.empty(), label, "success did not clear error");
     check(meta.dtype == 7, label, "unexpected dtype");
-    check(meta.sizes.size() == 2 && meta.sizes[0] == 3 && meta.sizes[1] == 4, label, "unexpected sizes");
-    check(meta.strides.size() == 2 && meta.strides[0] == 4 && meta.strides[1] == 1, label, "unexpected strides");
-    check(meta.storage_offset == 0, label, "unexpected storage offset");
+    check(meta.sizes.size() == 2 && meta.sizes[0].type == pnnx::EXPORTED_SYM_INT_STATIC && meta.sizes[0].value == 3 && meta.sizes[1].value == 4, label, "unexpected sizes");
+    check(meta.strides.size() == 2 && meta.strides[0].type == pnnx::EXPORTED_SYM_INT_STATIC && meta.strides[0].value == 4 && meta.strides[1].value == 1, label, "unexpected strides");
+    check(meta.storage_offset.type == pnnx::EXPORTED_SYM_INT_STATIC && meta.storage_offset.value == 0, label, "unexpected storage offset");
     check(meta.layout == 7, label, "unexpected layout");
     check(meta.requires_grad, label, "unexpected requires_grad");
     check(meta.device_type == "cpu", label, "unexpected device type");
@@ -355,12 +355,38 @@ static void expect_tensor_error(const std::string& text, const std::string& path
 
     check(error.path == path, label, "unexpected path " + error.path);
     check(error.message.find(message) != std::string::npos, label, "unexpected message " + error.message);
-    check(meta.dtype == 0 && meta.sizes.empty() && meta.strides.empty() && meta.storage_offset == 0 && meta.layout == 0 && !meta.requires_grad && meta.device_type.empty() && meta.device_index == 0 && !meta.has_device_index, label, "failure did not reset output");
+    check(meta.dtype == 0 && meta.sizes.empty() && meta.strides.empty() && meta.storage_offset.type == pnnx::EXPORTED_SYM_INT_STATIC && meta.storage_offset.value == 0 && meta.layout == 0 && !meta.requires_grad && meta.device_type.empty() && meta.device_index == 0 && !meta.has_device_index, label, "failure did not reset output");
+}
+
+static void expect_symbolic_tensor_meta()
+{
+    const std::string label = "tensor symbolic metadata";
+    const std::string text = tensor_meta_json(
+        "[{\"as_expr\":{\"expr_str\":\"Symbol('u0', integer=True)\",\"hint\":null}},{\"as_int\":4}]",
+        "[{\"as_expr\":{\"expr_str\":\"Mul(Integer(4), Symbol('u0', integer=True))\",\"hint\":{\"as_int\":12}}},{\"as_int\":1}]",
+        "{\"as_expr\":{\"expr_str\":\"Symbol('u1', integer=True)\",\"hint\":{\"as_int\":2}}}");
+
+    test_paths++;
+    pnnx::JsonValue value;
+    if (!parse_document(text, value, label))
+        return;
+
+    pnnx::ExportedTensorMeta meta;
+    pnnx::ExportedSchemaError error;
+    const int result = pnnx::parse_exported_tensor_meta(value, meta, error, "$.tensor_meta");
+    check(result == 0, label, error.path + " " + error.message);
+    if (result != 0)
+        return;
+
+    check(meta.sizes[0].type == pnnx::EXPORTED_SYM_INT_EXPRESSION && meta.sizes[0].expression == "Symbol('u0', integer=True)" && !meta.sizes[0].has_hint, label, "symbolic size changed");
+    check(meta.strides[0].type == pnnx::EXPORTED_SYM_INT_EXPRESSION && meta.strides[0].expression == "Mul(Integer(4), Symbol('u0', integer=True))" && meta.strides[0].has_hint && meta.strides[0].hint == 12, label, "symbolic stride changed");
+    check(meta.storage_offset.type == pnnx::EXPORTED_SYM_INT_EXPRESSION && meta.storage_offset.expression == "Symbol('u1', integer=True)" && meta.storage_offset.has_hint && meta.storage_offset.hint == 2, label, "symbolic offset changed");
 }
 
 static void test_tensor_meta()
 {
     expect_tensor(tensor_meta_json(), "tensor real static");
+    expect_symbolic_tensor_meta();
 
     test_paths++;
     {
@@ -389,14 +415,13 @@ static void test_tensor_meta()
     expect_tensor_error("{\"dtype\":7,\"sizes\":[],\"requires_grad\":false,\"device\":{\"type\":\"cpu\",\"index\":null},\"storage_offset\":{\"as_int\":0},\"layout\":7}", "$.tensor_meta.strides", "missing required field", "tensor missing strides");
     expect_tensor_error("{\"dtype\":7,\"sizes\":[],\"requires_grad\":false,\"device\":{\"type\":\"cpu\",\"index\":null},\"strides\":[],\"layout\":7}", "$.tensor_meta.storage_offset", "missing required field", "tensor missing offset");
     expect_tensor_error("{\"dtype\":7,\"sizes\":[],\"requires_grad\":false,\"device\":{\"type\":\"cpu\",\"index\":null},\"strides\":[],\"storage_offset\":{\"as_int\":0}}", "$.tensor_meta.layout", "missing required field", "tensor missing layout");
-    expect_tensor_error(tensor_meta_json("[{\"as_expr\":{\"expr_str\":\"s0\",\"hint\":{\"as_int\":3}}},{\"as_int\":4}]"), "$.tensor_meta.sizes[0].as_expr", "dynamic tensor metadata is unsupported", "tensor symbolic size");
-    expect_tensor_error(tensor_meta_json("[{\"as_name\":\"s0\"},{\"as_int\":4}]"), "$.tensor_meta.sizes[0].as_name", "dynamic tensor metadata is unsupported", "tensor named size");
-    expect_tensor_error(tensor_meta_json("[{}, {\"as_int\":4}]"), "$.tensor_meta.sizes[0]", "expected static SymInt as_int", "tensor empty symint");
+    expect_tensor_error(tensor_meta_json("[{\"as_name\":\"s0\"},{\"as_int\":4}]"), "$.tensor_meta.sizes[0]", "unknown SymInt tag as_name", "tensor named size");
+    expect_tensor_error(tensor_meta_json("[{}, {\"as_int\":4}]"), "$.tensor_meta.sizes[0]", "SymInt union must contain exactly one tag", "tensor empty symint");
     expect_tensor_error(tensor_meta_json("[{\"as_int\":\"3\"},{\"as_int\":4}]"), "$.tensor_meta.sizes[0].as_int", "expected integer", "tensor size type");
     expect_tensor_error(tensor_meta_json("[{\"as_int\":-1},{\"as_int\":4}]"), "$.tensor_meta.sizes[0].as_int", "tensor size must be non-negative", "tensor negative size");
     expect_tensor_error(tensor_meta_json("[{\"as_int\":3},{\"as_int\":4}]", "[{\"as_int\":4}]"), "$.tensor_meta.strides", "rank does not match sizes", "tensor rank mismatch");
-    expect_tensor_error(tensor_meta_json("[{\"as_int\":3},{\"as_int\":4}]", "[{\"as_expr\":{\"expr_str\":\"s0\"}},{\"as_int\":1}]"), "$.tensor_meta.strides[0].as_expr", "dynamic tensor metadata is unsupported", "tensor symbolic stride");
-    expect_tensor_error(tensor_meta_json("[{\"as_int\":3},{\"as_int\":4}]", "[{\"as_int\":4},{\"as_int\":1}]", "{\"as_expr\":{\"expr_str\":\"s0\"}}"), "$.tensor_meta.storage_offset.as_expr", "dynamic tensor metadata is unsupported", "tensor symbolic offset");
+    expect_tensor_error(tensor_meta_json("[{\"as_expr\":{\"expr_str\":\"\",\"hint\":null}},{\"as_int\":4}]"), "$.tensor_meta.sizes[0].as_expr.expr_str", "symbolic expression must not be empty", "tensor empty symbolic expression");
+    expect_tensor_error(tensor_meta_json("[{\"as_expr\":{\"expr_str\":\"s0\",\"hint\":{\"as_float\":3.0}}},{\"as_int\":4}]"), "$.tensor_meta.sizes[0].as_expr.hint", "SymInt hint must use as_int", "tensor symbolic size hint type");
     expect_tensor_error(tensor_meta_json("[{\"as_int\":3},{\"as_int\":4}]", "[{\"as_int\":4},{\"as_int\":1}]", "{\"as_int\":-1}"), "$.tensor_meta.storage_offset.as_int", "storage offset must be non-negative", "tensor negative offset");
     expect_tensor_error("{\"dtype\":7,\"sizes\":[],\"requires_grad\":false,\"device\":{\"index\":null},\"strides\":[],\"storage_offset\":{\"as_int\":0},\"layout\":7}", "$.tensor_meta.device.type", "missing required field", "tensor missing device type");
     expect_tensor_error("{\"dtype\":7,\"sizes\":[],\"requires_grad\":false,\"device\":{\"type\":\"cpu\"},\"strides\":[],\"storage_offset\":{\"as_int\":0},\"layout\":7}", "$.tensor_meta.device.index", "missing required field", "tensor missing device index");
@@ -660,8 +685,17 @@ static void test_graph_arguments()
     if (parse_argument_case("{\"as_sym_bools\":[{\"as_bool\":true},{\"as_bool\":false}]}", ",\"kind\":1", argument, kind, "argument static sym bools"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_BOOL_LIST && argument.bool_values.size() == 2 && !argument.bool_values[1], "argument static sym bools", "static sym bools changed");
 
-    if (parse_argument_case("{\"as_sym_int\":{\"as_name\":\"s0\"}}", ",\"kind\":1", argument, kind, "argument dynamic sym int"))
-        check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_sym_int" && argument.name == "s0", "argument dynamic sym int", "dynamic sym int classification changed");
+    {
+        ProgramFixture fixture;
+        fixture.sym_int_values = "{\"s0\":{\"as_expr\":{\"expr_str\":\"Symbol('u0', integer=True)\",\"hint\":null}}}";
+        fixture.nodes = "[{\"target\":\"torch.ops.aten.clone.default\",\"inputs\":[{\"name\":\"value\",\"arg\":{\"as_sym_int\":{\"as_name\":\"s0\"}},\"kind\":1}],\"outputs\":[" + tensor_argument_json("y") + "],\"metadata\":{},\"is_hop_single_tensor_return\":null,\"name\":\"y\"}]";
+        pnnx::ExportedProgram program;
+        if (parse_program_fixture(fixture, program, "argument dynamic sym int"))
+        {
+            argument = program.graph.nodes[0].inputs[0].arg;
+            check(argument.type == pnnx::EXPORTED_ARGUMENT_SYMBOLIC_INT && argument.name == "s0", "argument dynamic sym int", "dynamic sym int classification changed");
+        }
+    }
 
     if (parse_argument_case("{\"as_custom_obj\":{\"name\":\"obj\",\"class_fqn\":\"pkg.Type\"}}", ",\"kind\":1", argument, kind, "argument custom object"))
         check(argument.type == pnnx::EXPORTED_ARGUMENT_UNSUPPORTED && argument.unsupported_tag == "as_custom_obj" && argument.name == "obj" && argument.string_value == "pkg.Type", "argument custom object", "custom object classification changed");
@@ -915,20 +949,27 @@ static void test_program_errors()
     expect_program_error(fixture, "$.graph_module.graph.tensor_values.missing", "missing tensor metadata", "program tensor list missing value");
 
     fixture = ProgramFixture();
-    fixture.sym_int_values = "{\"s0\":{\"as_int\":2}}";
-    expect_program_error(fixture, "$.graph_module.graph.sym_int_values", "dynamic symbolic values are unsupported", "program sym int values");
+    fixture.sym_int_values = "{\"size\":{\"as_expr\":{\"expr_str\":\"Symbol('u0', integer=True)\",\"hint\":null}},\"static_size\":{\"as_int\":2}}";
+    fixture.sym_bool_values = "{\"guard\":{\"as_expr\":{\"expr_str\":\"GreaterThan(Symbol('u0', integer=True), Integer(0))\",\"hint\":{\"as_bool\":true}}},\"static_guard\":{\"as_bool\":true}}";
+    fixture.sym_float_values = "{\"scale\":{\"as_expr\":{\"expr_str\":\"FloatTrueDiv(Symbol('u0', integer=True), Integer(2))\",\"hint\":{\"as_float\":1.5}}},\"static_scale\":{\"as_float\":1.0}}";
+    fixture.range_constraints = "{\"u0\":{\"min_val\":0,\"max_val\":48},\"u1\":{\"min_val\":null,\"max_val\":null}}";
+    pnnx::ExportedProgram symbolic_program;
+    if (parse_program_fixture(fixture, symbolic_program, "program symbolic values"))
+    {
+        check(symbolic_program.graph.sym_int_values["size"].type == pnnx::EXPORTED_SYM_INT_EXPRESSION && symbolic_program.graph.sym_int_values["size"].expression == "Symbol('u0', integer=True)", "program symbolic values", "symbolic int changed");
+        check(symbolic_program.graph.sym_bool_values["guard"].is_expression && symbolic_program.graph.sym_bool_values["guard"].has_hint && symbolic_program.graph.sym_bool_values["guard"].hint, "program symbolic values", "symbolic bool changed");
+        check(symbolic_program.graph.sym_float_values["scale"].is_expression && symbolic_program.graph.sym_float_values["scale"].has_hint && symbolic_program.graph.sym_float_values["scale"].hint == 1.5, "program symbolic values", "symbolic float changed");
+        check(symbolic_program.range_constraints["u0"].has_min && symbolic_program.range_constraints["u0"].min == 0 && symbolic_program.range_constraints["u0"].has_max && symbolic_program.range_constraints["u0"].max == 48, "program symbolic values", "range constraint changed");
+        check(!symbolic_program.range_constraints["u1"].has_min && !symbolic_program.range_constraints["u1"].has_max, "program symbolic values", "unbounded range changed");
+    }
 
     fixture = ProgramFixture();
-    fixture.sym_bool_values = "{\"b0\":{\"as_bool\":true}}";
-    expect_program_error(fixture, "$.graph_module.graph.sym_bool_values", "dynamic symbolic values are unsupported", "program sym bool values");
+    fixture.sym_int_values = "{\"s0\":{\"as_expr\":{\"hint\":null}}}";
+    expect_program_error(fixture, "$.graph_module.graph.sym_int_values.s0.as_expr.expr_str", "missing required field", "program symbolic expression missing text");
 
     fixture = ProgramFixture();
-    fixture.sym_float_values = "{\"f0\":{\"as_float\":1.0}}";
-    expect_program_error(fixture, "$.graph_module.graph.sym_float_values", "dynamic symbolic values are unsupported", "program sym float values");
-
-    fixture = ProgramFixture();
-    fixture.range_constraints = "{\"s0\":{\"min_val\":1,\"max_val\":8}}";
-    expect_program_error(fixture, "$.range_constraints", "dynamic range constraints are unsupported", "program range constraints");
+    fixture.range_constraints = "{\"s0\":{\"min_val\":0}}";
+    expect_program_error(fixture, "$.range_constraints.s0.max_val", "missing required field", "program range missing maximum");
 
     fixture = ProgramFixture();
     fixture.is_single_tensor_return = "true";
@@ -975,14 +1016,17 @@ static void test_program_errors()
         check(program.graph.nodes.size() == 1 && !program.graph.nodes[0].has_name && program.graph.nodes[0].name.empty(), "program schema 8.14 node without name", "missing node name changed");
 }
 
-static std::string join_ints(const std::vector<int64_t>& values)
+static std::string join_symints(const std::vector<pnnx::ExportedSymInt>& values)
 {
     std::ostringstream text;
     for (size_t i = 0; i < values.size(); i++)
     {
         if (i != 0)
             text << ',';
-        text << values[i];
+        if (values[i].type == pnnx::EXPORTED_SYM_INT_STATIC)
+            text << values[i].value;
+        else
+            text << values[i].expression;
     }
 
     return text.str();
@@ -1002,9 +1046,9 @@ static void print_payload_config(const char* config_name, const pnnx::ExportedPa
                 entry.use_pickle ? 1 : 0,
                 entry.has_tensor_meta ? 1 : 0,
                 (long long)meta.dtype,
-                join_ints(meta.sizes).c_str(),
-                join_ints(meta.strides).c_str(),
-                (long long)meta.storage_offset,
+                join_symints(meta.sizes).c_str(),
+                join_symints(meta.strides).c_str(),
+                (long long)meta.storage_offset.value,
                 meta.device_type.c_str());
         if (meta.has_device_index)
             fprintf(stdout, "%lld", (long long)meta.device_index);

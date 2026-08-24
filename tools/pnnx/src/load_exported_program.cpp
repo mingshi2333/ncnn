@@ -20,6 +20,90 @@
 
 namespace pnnx {
 
+static bool is_symbol_name(const std::string& value)
+{
+    if (value.empty())
+        return false;
+
+    const unsigned char first = (unsigned char)value[0];
+    if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_'))
+        return false;
+
+    for (size_t i = 1; i < value.size(); i++)
+    {
+        const unsigned char ch = (unsigned char)value[i];
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'))
+            return false;
+    }
+
+    return true;
+}
+
+static bool parse_plain_integer_symbol(const std::string& expression, std::string& symbol)
+{
+    const std::string prefix = "Symbol('";
+    const std::string suffix = "', integer=True)";
+    if (expression.size() <= prefix.size() + suffix.size())
+        return false;
+    if (expression.compare(0, prefix.size(), prefix) != 0)
+        return false;
+    if (expression.compare(expression.size() - suffix.size(), suffix.size(), suffix) != 0)
+        return false;
+
+    symbol = expression.substr(prefix.size(), expression.size() - prefix.size() - suffix.size());
+    return is_symbol_name(symbol);
+}
+
+static int resolve_tensor_size(const ExportedProgram& program, const std::string& name, size_t dimension, const ExportedSymInt& size, int& resolved, std::string& error)
+{
+    if (size.type == EXPORTED_SYM_INT_STATIC)
+    {
+        if (size.value < 0)
+        {
+            std::ostringstream message;
+            message << "tensor " << name << " has a negative size at dimension " << dimension;
+            error = message.str();
+            return -1;
+        }
+        if (size.value > INT_MAX)
+        {
+            error = "tensor shape does not fit pnnx for " + name;
+            return -1;
+        }
+
+        resolved = (int)size.value;
+        return 0;
+    }
+
+    std::string symbol;
+    if (!parse_plain_integer_symbol(size.expression, symbol))
+    {
+        std::ostringstream message;
+        message << "tensor " << name << " has unsupported symbolic size " << size.expression << " at dimension " << dimension;
+        error = message.str();
+        return -1;
+    }
+
+    const std::map<std::string, ExportedRangeConstraint>::const_iterator constraint_it = program.range_constraints.find(symbol);
+    if (constraint_it == program.range_constraints.end() || !constraint_it->second.has_max)
+    {
+        std::ostringstream message;
+        message << "tensor " << name << " symbolic size " << symbol << " has no finite upper bound at dimension " << dimension;
+        error = message.str();
+        return -1;
+    }
+    if (constraint_it->second.max < 0 || constraint_it->second.max > INT_MAX)
+    {
+        std::ostringstream message;
+        message << "tensor " << name << " symbolic size " << symbol << " upper bound does not fit pnnx at dimension " << dimension;
+        error = message.str();
+        return -1;
+    }
+
+    resolved = (int)constraint_it->second.max;
+    return 0;
+}
+
 static int set_tensor_metadata(const ExportedProgram& program, const std::string& name, Operand* operand, std::string& error)
 {
     const std::map<std::string, ExportedTensorMeta>::const_iterator meta_it = program.graph.tensor_values.find(name);
@@ -50,19 +134,10 @@ static int set_tensor_metadata(const ExportedProgram& program, const std::string
     shape.reserve(meta.sizes.size());
     for (size_t i = 0; i < meta.sizes.size(); i++)
     {
-        if (meta.sizes[i] < 0)
-        {
-            std::ostringstream message;
-            message << "tensor " << name << " has a negative or symbolic size at dimension " << i;
-            error = message.str();
+        int resolved = 0;
+        if (resolve_tensor_size(program, name, i, meta.sizes[i], resolved, error) != 0)
             return -1;
-        }
-        if (meta.sizes[i] > INT_MAX)
-        {
-            error = "tensor shape does not fit pnnx for " + name;
-            return -1;
-        }
-        shape.push_back((int)meta.sizes[i]);
+        shape.push_back(resolved);
     }
 
     operand->type = pnnx_type;

@@ -25,14 +25,66 @@ struct ExportedProgramHeader
     std::map<std::string, int64_t> opset_version;
 };
 
+enum ExportedSymIntType
+{
+    EXPORTED_SYM_INT_STATIC,
+    EXPORTED_SYM_INT_EXPRESSION
+};
+
+struct ExportedSymInt
+{
+    ExportedSymInt();
+    ExportedSymInt(int64_t value);
+
+    ExportedSymIntType type;
+    int64_t value;
+    std::string expression;
+    bool has_hint;
+    int64_t hint;
+};
+
+bool operator==(const ExportedSymInt& a, const ExportedSymInt& b);
+
+struct ExportedSymBool
+{
+    ExportedSymBool();
+
+    bool is_expression;
+    bool value;
+    std::string expression;
+    bool has_hint;
+    bool hint;
+};
+
+struct ExportedSymFloat
+{
+    ExportedSymFloat();
+
+    bool is_expression;
+    double value;
+    std::string expression;
+    bool has_hint;
+    double hint;
+};
+
+struct ExportedRangeConstraint
+{
+    ExportedRangeConstraint();
+
+    bool has_min;
+    int64_t min;
+    bool has_max;
+    int64_t max;
+};
+
 struct ExportedTensorMeta
 {
     ExportedTensorMeta();
 
     int64_t dtype;
-    std::vector<int64_t> sizes;
-    std::vector<int64_t> strides;
-    int64_t storage_offset;
+    std::vector<ExportedSymInt> sizes;
+    std::vector<ExportedSymInt> strides;
+    ExportedSymInt storage_offset;
     int64_t layout;
     bool requires_grad;
     std::string device_type;
@@ -77,6 +129,9 @@ enum ExportedArgumentType
     EXPORTED_ARGUMENT_LAYOUT,
     EXPORTED_ARGUMENT_DEVICE,
     EXPORTED_ARGUMENT_GRAPH,
+    EXPORTED_ARGUMENT_SYMBOLIC_INT,
+    EXPORTED_ARGUMENT_SYMBOLIC_FLOAT,
+    EXPORTED_ARGUMENT_SYMBOLIC_BOOL,
     EXPORTED_ARGUMENT_UNSUPPORTED
 };
 
@@ -207,6 +262,9 @@ struct ExportedGraph
     std::vector<ExportedNode> nodes;
     std::vector<ExportedArgument> outputs;
     std::map<std::string, ExportedTensorMeta> tensor_values;
+    std::map<std::string, ExportedSymInt> sym_int_values;
+    std::map<std::string, ExportedSymBool> sym_bool_values;
+    std::map<std::string, ExportedSymFloat> sym_float_values;
     std::map<std::string, ExportedArgument> custom_obj_values;
     bool is_single_tensor_return;
 };
@@ -218,6 +276,7 @@ struct ExportedProgram
     std::vector<ExportedInputSpec> input_specs;
     std::vector<ExportedOutputSpec> output_specs;
     ExportedTreeSpec output_tree_spec;
+    std::map<std::string, ExportedRangeConstraint> range_constraints;
 };
 
 struct ExportedSchemaError

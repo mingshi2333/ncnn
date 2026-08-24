@@ -31,8 +31,10 @@ static pnnx::ExportedTensorMeta make_meta(int64_t dtype, const std::vector<int64
 {
     pnnx::ExportedTensorMeta meta;
     meta.dtype = dtype;
-    meta.sizes = sizes;
-    meta.strides = strides;
+    for (size_t i = 0; i < sizes.size(); i++)
+        meta.sizes.push_back(pnnx::ExportedSymInt(sizes[i]));
+    for (size_t i = 0; i < strides.size(); i++)
+        meta.strides.push_back(pnnx::ExportedSymInt(strides[i]));
     meta.storage_offset = storage_offset;
     meta.layout = 7;
     meta.device_type = "cpu";
@@ -252,6 +254,21 @@ static void test_errors()
     pnnx::ExportedTensorMeta meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
     meta.layout = 1;
     expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "unsupported tensor layout", "sparse layout");
+
+    meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    meta.sizes[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    meta.sizes[0].expression = "Symbol('u0', integer=True)";
+    expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "symbolic tensor size at dimension 0 cannot be materialized", "symbolic state size");
+
+    meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    meta.strides[0].type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    meta.strides[0].expression = "Symbol('u0', integer=True)";
+    expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "symbolic tensor stride at dimension 0 cannot be materialized", "symbolic state stride");
+
+    meta = make_meta(7, std::vector<int64_t>{2}, std::vector<int64_t>{1}, 0);
+    meta.storage_offset.type = pnnx::EXPORTED_SYM_INT_EXPRESSION;
+    meta.storage_offset.expression = "Symbol('u0', integer=True)";
+    expect_error(meta, storage, pnnx::PT2_BYTE_ORDER_LITTLE, "symbolic storage offset cannot be materialized", "symbolic state offset");
 
     expect_error(make_meta(7, std::vector<int64_t>{1}, std::vector<int64_t>{1}, 0), std::vector<char>(3, 0), pnnx::PT2_BYTE_ORDER_LITTLE, "not aligned to element size", "unaligned storage");
     expect_error(make_meta(7, std::vector<int64_t>{1}, std::vector<int64_t>{1}, 6), storage, pnnx::PT2_BYTE_ORDER_LITTLE, "tensor view exceeds storage", "offset out of bounds");

@@ -17,10 +17,58 @@ ExportedProgramHeader::ExportedProgramHeader()
     schema_minor = 0;
 }
 
+ExportedSymInt::ExportedSymInt()
+{
+    type = EXPORTED_SYM_INT_STATIC;
+    value = 0;
+    has_hint = false;
+    hint = 0;
+}
+
+ExportedSymInt::ExportedSymInt(int64_t value_)
+{
+    type = EXPORTED_SYM_INT_STATIC;
+    value = value_;
+    has_hint = false;
+    hint = 0;
+}
+
+bool operator==(const ExportedSymInt& a, const ExportedSymInt& b)
+{
+    return a.type == b.type
+           && a.value == b.value
+           && a.expression == b.expression
+           && a.has_hint == b.has_hint
+           && a.hint == b.hint;
+}
+
+ExportedSymBool::ExportedSymBool()
+{
+    is_expression = false;
+    value = false;
+    has_hint = false;
+    hint = false;
+}
+
+ExportedSymFloat::ExportedSymFloat()
+{
+    is_expression = false;
+    value = 0.0;
+    has_hint = false;
+    hint = 0.0;
+}
+
+ExportedRangeConstraint::ExportedRangeConstraint()
+{
+    has_min = false;
+    min = 0;
+    has_max = false;
+    max = 0;
+}
+
 ExportedTensorMeta::ExportedTensorMeta()
 {
     dtype = 0;
-    storage_offset = 0;
     layout = 0;
     requires_grad = false;
     device_index = 0;
@@ -386,26 +434,110 @@ int parse_exported_program_header(const JsonValue& value, ExportedProgramHeader&
     return 0;
 }
 
-static int parse_static_symint(const JsonValue& value, int64_t& result, const std::string& path, ExportedSchemaError& error)
+static int parse_symbolic_expression(const JsonValue& value, std::string& expression, const JsonValue*& hint, const std::string& path, ExportedSchemaError& error)
 {
     if (value.type() != JSON_OBJECT)
-        return schema_error(error, path, "expected static SymInt object");
+        return schema_error(error, path, "expected object");
 
-    if (value.find("as_expr"))
-        return schema_error(error, path + ".as_expr", "dynamic tensor metadata is unsupported");
-    if (value.find("as_name"))
-        return schema_error(error, path + ".as_name", "dynamic tensor metadata is unsupported");
+    const JsonValue* expr_str = required_field(value, "expr_str", path, error);
+    if (!expr_str)
+        return -1;
+    if (read_string(*expr_str, expression, path + ".expr_str", error) != 0)
+        return -1;
+    if (expression.empty())
+        return schema_error(error, path + ".expr_str", "symbolic expression must not be empty");
 
-    const JsonValue* as_int = value.find("as_int");
-    if (!as_int)
-        return schema_error(error, path, "expected static SymInt as_int");
-    if (value.as_object().size() != 1)
-        return schema_error(error, path, "static SymInt union must contain only as_int");
+    hint = required_field(value, "hint", path, error);
+    if (!hint)
+        return -1;
 
-    return read_integer(*as_int, result, path + ".as_int", error);
+    return 0;
 }
 
-static int parse_static_symint_array(const JsonValue& value, std::vector<int64_t>& result, const std::string& path, bool is_size, ExportedSchemaError& error)
+static int parse_symint(const JsonValue& value, ExportedSymInt& result, const std::string& path, ExportedSchemaError& error)
+{
+    result = ExportedSymInt();
+    if (value.type() != JSON_OBJECT || value.as_object().size() != 1)
+        return schema_error(error, path, "SymInt union must contain exactly one tag");
+
+    const std::map<std::string, JsonValue>::const_iterator it = value.as_object().begin();
+    if (it->first == "as_int")
+        return read_integer(it->second, result.value, path + ".as_int", error);
+    if (it->first != "as_expr")
+        return schema_error(error, path, "unknown SymInt tag " + it->first);
+
+    const JsonValue* hint = 0;
+    if (parse_symbolic_expression(it->second, result.expression, hint, path + ".as_expr", error) != 0)
+        return -1;
+
+    result.type = EXPORTED_SYM_INT_EXPRESSION;
+    if (hint->type() == JSON_NULL)
+        return 0;
+    if (hint->type() != JSON_OBJECT || hint->as_object().size() != 1 || hint->as_object().begin()->first != "as_int")
+        return schema_error(error, path + ".as_expr.hint", "SymInt hint must use as_int");
+    if (read_integer(hint->as_object().begin()->second, result.hint, path + ".as_expr.hint.as_int", error) != 0)
+        return -1;
+    result.has_hint = true;
+    return 0;
+}
+
+static int parse_symbool(const JsonValue& value, ExportedSymBool& result, const std::string& path, ExportedSchemaError& error)
+{
+    result = ExportedSymBool();
+    if (value.type() != JSON_OBJECT || value.as_object().size() != 1)
+        return schema_error(error, path, "SymBool union must contain exactly one tag");
+
+    const std::map<std::string, JsonValue>::const_iterator it = value.as_object().begin();
+    if (it->first == "as_bool")
+        return read_bool(it->second, result.value, path + ".as_bool", error);
+    if (it->first != "as_expr")
+        return schema_error(error, path, "unknown SymBool tag " + it->first);
+
+    const JsonValue* hint = 0;
+    if (parse_symbolic_expression(it->second, result.expression, hint, path + ".as_expr", error) != 0)
+        return -1;
+
+    result.is_expression = true;
+    if (hint->type() == JSON_NULL)
+        return 0;
+    if (hint->type() != JSON_OBJECT || hint->as_object().size() != 1 || hint->as_object().begin()->first != "as_bool")
+        return schema_error(error, path + ".as_expr.hint", "SymBool hint must use as_bool");
+    if (read_bool(hint->as_object().begin()->second, result.hint, path + ".as_expr.hint.as_bool", error) != 0)
+        return -1;
+    result.has_hint = true;
+    return 0;
+}
+
+static int read_double(const JsonValue& value, double& result, const std::string& path, ExportedSchemaError& error);
+
+static int parse_symfloat(const JsonValue& value, ExportedSymFloat& result, const std::string& path, ExportedSchemaError& error)
+{
+    result = ExportedSymFloat();
+    if (value.type() != JSON_OBJECT || value.as_object().size() != 1)
+        return schema_error(error, path, "SymFloat union must contain exactly one tag");
+
+    const std::map<std::string, JsonValue>::const_iterator it = value.as_object().begin();
+    if (it->first == "as_float")
+        return read_double(it->second, result.value, path + ".as_float", error);
+    if (it->first != "as_expr")
+        return schema_error(error, path, "unknown SymFloat tag " + it->first);
+
+    const JsonValue* hint = 0;
+    if (parse_symbolic_expression(it->second, result.expression, hint, path + ".as_expr", error) != 0)
+        return -1;
+
+    result.is_expression = true;
+    if (hint->type() == JSON_NULL)
+        return 0;
+    if (hint->type() != JSON_OBJECT || hint->as_object().size() != 1 || hint->as_object().begin()->first != "as_float")
+        return schema_error(error, path + ".as_expr.hint", "SymFloat hint must use as_float");
+    if (read_double(hint->as_object().begin()->second, result.hint, path + ".as_expr.hint.as_float", error) != 0)
+        return -1;
+    result.has_hint = true;
+    return 0;
+}
+
+static int parse_symint_array(const JsonValue& value, std::vector<ExportedSymInt>& result, const std::string& path, bool is_size, ExportedSchemaError& error)
 {
     if (value.type() != JSON_ARRAY)
         return schema_error(error, path, "expected array");
@@ -417,11 +549,13 @@ static int parse_static_symint_array(const JsonValue& value, std::vector<int64_t
         std::ostringstream item_path;
         item_path << path << '[' << i << ']';
 
-        int64_t item = 0;
-        if (parse_static_symint(values[i], item, item_path.str(), error) != 0)
+        ExportedSymInt item;
+        if (parse_symint(values[i], item, item_path.str(), error) != 0)
             return -1;
-        if (item < 0)
+        if (item.type == EXPORTED_SYM_INT_STATIC && item.value < 0)
             return schema_error(error, item_path.str() + ".as_int", is_size ? "tensor size must be non-negative" : "tensor stride must be non-negative");
+        if (item.type == EXPORTED_SYM_INT_EXPRESSION && item.has_hint && item.hint < 0)
+            return schema_error(error, item_path.str() + ".as_expr.hint.as_int", is_size ? "tensor size hint must be non-negative" : "tensor stride hint must be non-negative");
 
         result.push_back(item);
     }
@@ -449,7 +583,7 @@ int parse_exported_tensor_meta(const JsonValue& value, ExportedTensorMeta& tenso
     const JsonValue* sizes = required_field(value, "sizes", tensor_path, error);
     if (!sizes)
         return -1;
-    if (parse_static_symint_array(*sizes, parsed_meta.sizes, tensor_path + ".sizes", true, error) != 0)
+    if (parse_symint_array(*sizes, parsed_meta.sizes, tensor_path + ".sizes", true, error) != 0)
         return -1;
 
     const JsonValue* requires_grad = required_field(value, "requires_grad", tensor_path, error);
@@ -490,7 +624,7 @@ int parse_exported_tensor_meta(const JsonValue& value, ExportedTensorMeta& tenso
     const JsonValue* strides = required_field(value, "strides", tensor_path, error);
     if (!strides)
         return -1;
-    if (parse_static_symint_array(*strides, parsed_meta.strides, tensor_path + ".strides", false, error) != 0)
+    if (parse_symint_array(*strides, parsed_meta.strides, tensor_path + ".strides", false, error) != 0)
         return -1;
     if (parsed_meta.strides.size() != parsed_meta.sizes.size())
         return schema_error(error, tensor_path + ".strides", "tensor stride rank does not match sizes");
@@ -498,10 +632,12 @@ int parse_exported_tensor_meta(const JsonValue& value, ExportedTensorMeta& tenso
     const JsonValue* storage_offset = required_field(value, "storage_offset", tensor_path, error);
     if (!storage_offset)
         return -1;
-    if (parse_static_symint(*storage_offset, parsed_meta.storage_offset, tensor_path + ".storage_offset", error) != 0)
+    if (parse_symint(*storage_offset, parsed_meta.storage_offset, tensor_path + ".storage_offset", error) != 0)
         return -1;
-    if (parsed_meta.storage_offset < 0)
+    if (parsed_meta.storage_offset.type == EXPORTED_SYM_INT_STATIC && parsed_meta.storage_offset.value < 0)
         return schema_error(error, tensor_path + ".storage_offset.as_int", "storage offset must be non-negative");
+    if (parsed_meta.storage_offset.type == EXPORTED_SYM_INT_EXPRESSION && parsed_meta.storage_offset.has_hint && parsed_meta.storage_offset.hint < 0)
+        return schema_error(error, tensor_path + ".storage_offset.as_expr.hint.as_int", "storage offset hint must be non-negative");
 
     const JsonValue* layout = required_field(value, "layout", tensor_path, error);
     if (!layout)
@@ -973,7 +1109,8 @@ static int parse_exported_argument_value(const JsonValue& value, ExportedArgumen
             return -1;
         if (argument.type == EXPORTED_ARGUMENT_UNSUPPORTED)
         {
-            argument.unsupported_tag = tag;
+            argument.type = tag == "as_sym_int" ? EXPORTED_ARGUMENT_SYMBOLIC_INT : tag == "as_sym_float" ? EXPORTED_ARGUMENT_SYMBOLIC_FLOAT
+                                                                                                         : EXPORTED_ARGUMENT_SYMBOLIC_BOOL;
             return 0;
         }
 
@@ -1263,17 +1400,33 @@ static int validate_tensor_argument(const ExportedArgument& argument, const std:
     return 0;
 }
 
-static int validate_graph_tensor_arguments(const ExportedGraph& graph, const std::string& graph_path, ExportedSchemaError& error)
+static int validate_symbol_argument(const ExportedArgument& argument, const ExportedGraph& graph, const std::string& graph_path, ExportedSchemaError& error)
+{
+    if (argument.type == EXPORTED_ARGUMENT_SYMBOLIC_INT && graph.sym_int_values.find(argument.name) == graph.sym_int_values.end())
+        return schema_error(error, schema_map_key_path(graph_path + ".sym_int_values", argument.name), "missing symbolic int value");
+    if (argument.type == EXPORTED_ARGUMENT_SYMBOLIC_BOOL && graph.sym_bool_values.find(argument.name) == graph.sym_bool_values.end())
+        return schema_error(error, schema_map_key_path(graph_path + ".sym_bool_values", argument.name), "missing symbolic bool value");
+    if (argument.type == EXPORTED_ARGUMENT_SYMBOLIC_FLOAT && graph.sym_float_values.find(argument.name) == graph.sym_float_values.end())
+        return schema_error(error, schema_map_key_path(graph_path + ".sym_float_values", argument.name), "missing symbolic float value");
+
+    return 0;
+}
+
+static int validate_graph_arguments(const ExportedGraph& graph, const std::string& graph_path, ExportedSchemaError& error)
 {
     const std::string tensor_values_path = graph_path + ".tensor_values";
     for (size_t i = 0; i < graph.inputs.size(); i++)
     {
         if (validate_tensor_argument(graph.inputs[i], graph.tensor_values, tensor_values_path, error) != 0)
             return -1;
+        if (validate_symbol_argument(graph.inputs[i], graph, graph_path, error) != 0)
+            return -1;
     }
     for (size_t i = 0; i < graph.outputs.size(); i++)
     {
         if (validate_tensor_argument(graph.outputs[i], graph.tensor_values, tensor_values_path, error) != 0)
+            return -1;
+        if (validate_symbol_argument(graph.outputs[i], graph, graph_path, error) != 0)
             return -1;
     }
     for (size_t i = 0; i < graph.nodes.size(); i++)
@@ -1282,10 +1435,14 @@ static int validate_graph_tensor_arguments(const ExportedGraph& graph, const std
         {
             if (validate_tensor_argument(graph.nodes[i].inputs[j].arg, graph.tensor_values, tensor_values_path, error) != 0)
                 return -1;
+            if (validate_symbol_argument(graph.nodes[i].inputs[j].arg, graph, graph_path, error) != 0)
+                return -1;
         }
         for (size_t j = 0; j < graph.nodes[i].outputs.size(); j++)
         {
             if (validate_tensor_argument(graph.nodes[i].outputs[j], graph.tensor_values, tensor_values_path, error) != 0)
+                return -1;
+            if (validate_symbol_argument(graph.nodes[i].outputs[j], graph, graph_path, error) != 0)
                 return -1;
         }
     }
@@ -1293,19 +1450,24 @@ static int validate_graph_tensor_arguments(const ExportedGraph& graph, const std
     return 0;
 }
 
-static int reject_nonempty_symbol_map(const JsonValue& graph, const std::string& name, const std::string& graph_path, ExportedSchemaError& error, bool required)
+template<typename T>
+static int parse_symbol_map(const JsonValue& value, std::map<std::string, T>& result, const std::string& path, int (*parse_value)(const JsonValue&, T&, const std::string&, ExportedSchemaError&), ExportedSchemaError& error)
 {
-    const JsonValue* values = graph.find(name);
-    if (!values)
+    if (value.type() != JSON_OBJECT)
+        return schema_error(error, path, "expected object");
+
+    const std::map<std::string, JsonValue>& entries = value.as_object();
+    for (std::map<std::string, JsonValue>::const_iterator it = entries.begin(); it != entries.end(); ++it)
     {
-        if (required)
-            return schema_error(error, graph_path + "." + name, "missing required field");
-        return 0;
+        const std::string item_path = schema_map_key_path(path, it->first);
+        if (it->first.empty())
+            return schema_error(error, item_path, "symbolic value name must not be empty");
+
+        T parsed;
+        if (parse_value(it->second, parsed, item_path, error) != 0)
+            return -1;
+        result[it->first] = parsed;
     }
-    if (values->type() != JSON_OBJECT)
-        return schema_error(error, graph_path + "." + name, "expected object");
-    if (!values->as_object().empty())
-        return schema_error(error, graph_path + "." + name, "dynamic symbolic values are unsupported");
 
     return 0;
 }
@@ -1352,11 +1514,20 @@ static int parse_exported_graph(const JsonValue& value, ExportedGraph& graph, co
         graph.tensor_values[it->first] = meta;
     }
 
-    if (reject_nonempty_symbol_map(value, "sym_int_values", path, error, true) != 0)
+    const JsonValue* sym_int_values = required_field(value, "sym_int_values", path, error);
+    if (!sym_int_values)
         return -1;
-    if (reject_nonempty_symbol_map(value, "sym_bool_values", path, error, true) != 0)
+    if (parse_symbol_map(*sym_int_values, graph.sym_int_values, path + ".sym_int_values", parse_symint, error) != 0)
         return -1;
-    if (reject_nonempty_symbol_map(value, "sym_float_values", path, error, false) != 0)
+
+    const JsonValue* sym_bool_values = required_field(value, "sym_bool_values", path, error);
+    if (!sym_bool_values)
+        return -1;
+    if (parse_symbol_map(*sym_bool_values, graph.sym_bool_values, path + ".sym_bool_values", parse_symbool, error) != 0)
+        return -1;
+
+    const JsonValue* sym_float_values = value.find("sym_float_values");
+    if (sym_float_values && parse_symbol_map(*sym_float_values, graph.sym_float_values, path + ".sym_float_values", parse_symfloat, error) != 0)
         return -1;
 
     const JsonValue* is_single_tensor_return = value.find("is_single_tensor_return");
@@ -1388,7 +1559,7 @@ static int parse_exported_graph(const JsonValue& value, ExportedGraph& graph, co
         }
     }
 
-    return validate_graph_tensor_arguments(graph, path, error);
+    return validate_graph_arguments(graph, path, error);
 }
 
 static int read_nonempty_string_field(const JsonValue& object, const std::string& name, std::string& result, const std::string& path, ExportedSchemaError& error)
@@ -1842,6 +2013,50 @@ static int validate_signature_tensor_arguments(const ExportedProgram& program, E
     return 0;
 }
 
+static int parse_range_constraints(const JsonValue& value, std::map<std::string, ExportedRangeConstraint>& constraints, const std::string& path, ExportedSchemaError& error)
+{
+    if (value.type() != JSON_OBJECT)
+        return schema_error(error, path, "expected object");
+
+    const std::map<std::string, JsonValue>& entries = value.as_object();
+    for (std::map<std::string, JsonValue>::const_iterator it = entries.begin(); it != entries.end(); ++it)
+    {
+        const std::string item_path = schema_map_key_path(path, it->first);
+        if (it->first.empty())
+            return schema_error(error, item_path, "range constraint name must not be empty");
+        if (it->second.type() != JSON_OBJECT)
+            return schema_error(error, item_path, "expected object");
+
+        ExportedRangeConstraint constraint;
+        const JsonValue* min_val = required_field(it->second, "min_val", item_path, error);
+        if (!min_val)
+            return -1;
+        if (min_val->type() != JSON_NULL)
+        {
+            if (read_integer(*min_val, constraint.min, item_path + ".min_val", error) != 0)
+                return -1;
+            constraint.has_min = true;
+        }
+
+        const JsonValue* max_val = required_field(it->second, "max_val", item_path, error);
+        if (!max_val)
+            return -1;
+        if (max_val->type() != JSON_NULL)
+        {
+            if (read_integer(*max_val, constraint.max, item_path + ".max_val", error) != 0)
+                return -1;
+            constraint.has_max = true;
+        }
+
+        if (constraint.has_min && constraint.has_max && constraint.min > constraint.max)
+            return schema_error(error, item_path, "range constraint minimum exceeds maximum");
+
+        constraints[it->first] = constraint;
+    }
+
+    return 0;
+}
+
 int parse_exported_program(const JsonValue& value, ExportedProgram& program, ExportedSchemaError& error)
 {
     program = ExportedProgram();
@@ -1884,8 +2099,8 @@ int parse_exported_program(const JsonValue& value, ExportedProgram& program, Exp
         return -1;
     if (range_constraints->type() != JSON_OBJECT)
         return schema_error(error, "$.range_constraints", "expected object");
-    if (!range_constraints->as_object().empty())
-        return schema_error(error, "$.range_constraints", "dynamic range constraints are unsupported");
+    if (parse_range_constraints(*range_constraints, parsed_program.range_constraints, "$.range_constraints", error) != 0)
+        return -1;
 
     if (parsed_program.input_specs.size() != parsed_program.graph.inputs.size())
         return schema_error(error, "$.graph_module.signature.input_specs", "input spec count does not match graph inputs");
