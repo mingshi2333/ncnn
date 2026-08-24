@@ -960,6 +960,52 @@ static void test_batch_norm_constant_arguments()
     check(count_operator(graph, "aten::batch_norm") == 0 && count_operator(graph, "F.batch_norm") == 1, "batch norm pass level2", "batch_norm was not canonicalized");
 }
 
+static void test_instance_norm_running_stats()
+{
+    pnnx::ExportedProgram program = make_batch_norm_program();
+    pnnx::ExportedNode& instance_norm_node = program.graph.nodes[0];
+    instance_norm_node.target = "torch.ops.aten.instance_norm.default";
+    instance_norm_node.inputs[5].name = "use_input_stats";
+
+    std::map<std::string, pnnx::MaterializedExportedTensor> state;
+    state["weight"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["bias"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["running_mean"] = make_state_tensor(std::vector<int>{3}, 12);
+    state["running_var"] = make_state_tensor(std::vector<int>{3}, 12);
+
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, state, graph, error);
+
+    check(result == 0, "instance norm running stats", "lowering failed: " + error);
+    check(error.empty(), "instance norm running stats", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* instance_norm = find_operator(graph, "aten::instance_norm");
+    check(instance_norm != 0, "instance norm running stats", "missing aten::instance_norm");
+    check(instance_norm && instance_norm->inputnames == std::vector<std::string>({"input", "weight", "bias", "running_mean", "running_var", "use_input_stats", "momentum", "eps", "cudnn_enabled"}), "instance norm running stats", "instance_norm input names are not canonical");
+    check(instance_norm && instance_norm->inputs.size() == 9, "instance norm running stats", "instance_norm does not have nine inputs");
+    if (!instance_norm || instance_norm->inputs.size() != 9)
+        return;
+
+    const pnnx::Parameter& use_input_stats = instance_norm->inputs[5]->producer->params.at("value");
+    const pnnx::Parameter& momentum = instance_norm->inputs[6]->producer->params.at("value");
+    const pnnx::Parameter& eps = instance_norm->inputs[7]->producer->params.at("value");
+    const pnnx::Parameter& cudnn_enabled = instance_norm->inputs[8]->producer->params.at("value");
+    check(use_input_stats.type == 1 && !use_input_stats.b, "instance norm running stats", "use_input_stats constant is wrong");
+    check(momentum.type == 3 && momentum.f == 0.1f, "instance norm running stats", "momentum constant is wrong");
+    check(eps.type == 3 && eps.f == 1e-5f, "instance norm running stats", "eps constant is wrong");
+    check(cudnn_enabled.type == 1 && !cudnn_enabled.b, "instance norm running stats", "cudnn_enabled constant is wrong");
+
+    pnnx::pass_level2(graph);
+    pnnx::Operator* canonical = find_operator(graph, "F.instance_norm");
+    check(find_operator(graph, "aten::instance_norm") == 0 && canonical != 0, "instance norm running stats pass level2", "instance_norm with running stats was not canonicalized");
+    check(canonical && canonical->inputs.size() == 5 && canonical->inputnames == std::vector<std::string>({"input", "running_mean", "running_var", "weight", "bias"}), "instance norm running stats pass level2", "canonical tensor inputs changed");
+    check(canonical && canonical->has_param("use_input_stats") && canonical->params.at("use_input_stats").type == 1 && !canonical->params.at("use_input_stats").b, "instance norm running stats pass level2", "canonical use_input_stats is not false");
+    check(canonical && canonical->has_param("eps") && canonical->params.at("eps").type == 3 && canonical->params.at("eps").f == 1e-5f, "instance norm running stats pass level2", "canonical eps changed");
+}
+
 static void test_inplace_relu_is_functionalized_by_level2()
 {
     const pnnx::ExportedProgram program = make_inplace_relu_program();
@@ -1964,6 +2010,7 @@ int main(int argc, char** argv)
     test_conv_nd_direct_lowering();
     test_conv_transpose_nd_direct_lowering();
     test_batch_norm_constant_arguments();
+    test_instance_norm_running_stats();
     test_inplace_relu_is_functionalized_by_level2();
     test_max_pool2d_constant_arguments();
     test_inplace_add_is_functionalized_by_level2();
