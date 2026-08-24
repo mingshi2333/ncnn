@@ -93,7 +93,7 @@ PT2_EXPECTATIONS = {
     "test_Tensor_index_put": (PASS, ""),
     "test_Tensor_masked_fill": (PASS, ""),
     "test_Tensor_new_empty": (PASS, ""),
-    "test_Tensor_new_full": (PNNX_LOWERING_UNSUPPORTED, "SyntaxError: invalid syntax"),
+    "test_Tensor_new_full": (PASS, ""),
     "test_Tensor_new_ones": (PASS, ""),
     "test_Tensor_new_zeros": (PASS, ""),
     "test_Tensor_permute": (PASS, ""),

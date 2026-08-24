@@ -17,7 +17,8 @@ class Model(nn.Module):
         out2 = x.new_full((4,5,6,7,8), -0.5)
         out3 = x.new_full((1,2,1), 0)
         out4 = x.new_full((3,3,3,3), 1, dtype=torch.long)
-        return out0, out1, out2, out3, out4
+        out5 = x.new_full((), 2.25)
+        return out0, out1, out2, out3, out4, out5
 
 def test():
     net = Model()
@@ -39,10 +40,9 @@ def test():
 
     b = mod.test_inference()
 
-    # test shape only for uninitialized data
     passed = True
     for a0, b0 in zip(a, b):
-        if not a0.shape == b0.shape:
+        if a0.shape != b0.shape or a0.dtype != b0.dtype or not torch.equal(a0, b0):
             passed = False
     return check_numerical_result("test_Tensor_new_full", passed)
 
