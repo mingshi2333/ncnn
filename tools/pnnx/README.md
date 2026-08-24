@@ -58,7 +58,7 @@ torch.export.save(exported_program, "model.pt2")
 pnnx model.pt2
 ```
 
-The input shapes and model state are read from the PT2 package. Parameters, persistent buffers and tensor constants become PNNX model attributes instead of runtime inputs.
+The input shapes and model state are read from the PT2 package. Parameters, persistent and non-persistent buffers, and tensor constants become PNNX model attributes instead of runtime inputs.
 
 3. Export the generated PNNX python model as another ExportedProgram
 
@@ -71,22 +71,26 @@ This creates `model_pnnx.pt2` and returns the `torch.export.ExportedProgram` obj
 ### Current ExportedProgram support
 
 - PT2 archive version `0` with one ExportedProgram and uncompressed, unencrypted ZIP entries
-- Raw tensor payloads produced by PyTorch 2.9.0, 2.10.0, 2.11.0 and 2.12.1
-- Static inference graphs with flat tensor user inputs and outputs
-- Parameters, persistent buffers and tensor constants with raw strided tensor payloads, including shape, stride and storage offset
+- Raw tensor payloads produced by PyTorch 2.9.0, 2.10.0, 2.11.0, 2.12.1 and 2.13.0
+- Inference graphs with flat tensor user inputs and tensor output leaves, including protocol-1 tuple/list trees in generated PNNX Python models
+- Static tensor shapes and the tested bounded-dynamic subset used by the operator suite, including dynamic input dimensions, finite result bounds, symbolic scalar dataflow and mixed symbolic integer lists
+- Parameters, persistent and non-persistent buffers, and tensor constants with raw strided tensor payloads, including shape, stride and storage offset
 - Byte, Char, Short, Int, Long, Half, Float, Double, ComplexHalf, ComplexFloat, ComplexDouble, Bool and BFloat16 state tensors
 - ATen operator targets registered by the linked libtorch dispatcher when their serialized arguments can be represented and the resulting graph can be lowered by the existing PNNX passes
+- Disabled `wrap_with_set_grad_enabled` and `wrap_with_autocast` higher-order wrappers with tensor-only captured graphs
 - Operator overloads and defaults are resolved against the linked libtorch dispatcher, and the archive ATen opset must match the linked libtorch opset
 - The exact operator and model support matrix is tracked by the `test_pt2_*` expectation suite
 
 ### Unsupported ExportedProgram features
 
-- PyTorch 2.8 legacy pickled-payload PT2 and unverified producer versions after PyTorch 2.12.1
+- PyTorch 2.8 legacy pickled-payload PT2 and unverified producer versions after PyTorch 2.13.0
 - AOTInductor-only packages or multiple ExportedPrograms in one PT2 package
-- Dynamic shapes, symbolic tensor metadata and range constraints
+- Unbounded or unsupported symbolic expressions, dynamic model state, and symbolic scalar user inputs or outputs
+- Nested input PyTrees, and dict, namedtuple or custom PyTree outputs
 - Training graphs, loss or gradient outputs, and parameter, buffer or user-input mutation outputs
-- Non-persistent buffers, custom objects, tokens and higher-order operators
-- Non-tensor user inputs or outputs, unsupported serialized operator arguments and graphs which the existing PNNX passes cannot lower
+- Custom objects, tokens, unknown higher-order operators, enabled autocast/set-grad wrappers and control-flow or mutation higher-order operators
+- Non-tensor user input or output leaves, unsupported serialized operator arguments, and graphs which the existing PNNX passes cannot lower
+- Automatic reconstruction of the original dynamic-shape constraints in generated `export_exported_program()` helpers
 - Compressed or encrypted PT2 entries and PT2 archive versions other than `0`
 
 Unsupported inputs fail with a feature-specific `load exported program failed:` diagnostic. They are not silently treated as TorchScript.
