@@ -129,6 +129,7 @@ add_executable(pnnx_test_exported_program_ir
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_linear.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_max_pool2d.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_relu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/F_softmax.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_cat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_chunk.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/pass_level2/torch_clone.cpp

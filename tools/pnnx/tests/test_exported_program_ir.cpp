@@ -1066,6 +1066,57 @@ static void test_string_and_memory_format_argument_lowering()
     }
 }
 
+static void test_scalar_type_argument_lowering()
+{
+    const int64_t exported_values[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+    const int pnnx_values[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15};
+
+    for (size_t i = 0; i < sizeof(exported_values) / sizeof(exported_values[0]); i++)
+    {
+        const pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.softmax.int", "softmax",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_input("dim", make_int(1)),
+                make_keyword_input("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, exported_values[i]))});
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result == 0, "scalar type enum mapping", error);
+        if (result != 0)
+            continue;
+
+        pnnx::Operator* softmax = find_operator(graph, "aten::softmax");
+        check(softmax && softmax->inputnames == std::vector<std::string>({"self", "dim", "dtype"}), "scalar type enum mapping", "softmax input names are not canonical");
+        check(softmax && softmax->inputs.size() == 3 && softmax->inputs[2]->producer && softmax->inputs[2]->producer->has_param("value"), "scalar type enum mapping", "dtype constant is missing");
+        if (softmax && softmax->inputs.size() == 3 && softmax->inputs[2]->producer && softmax->inputs[2]->producer->has_param("value"))
+        {
+            const pnnx::Parameter& dtype = softmax->inputs[2]->producer->params.at("value");
+            check(dtype.type == 2 && dtype.i == pnnx_values[i], "scalar type enum mapping", "scalar type enum value is wrong");
+        }
+
+        pnnx::pass_level2(graph);
+        check(count_operator(graph, "aten::softmax") == 0 && count_operator(graph, "F.softmax") == 1, "scalar type pass level2", "softmax did not consume the dtype constant");
+    }
+
+    const int64_t unsupported_values[] = {0, 28, 29, 32, INT64_MAX};
+    for (size_t i = 0; i < sizeof(unsupported_values) / sizeof(unsupported_values[0]); i++)
+    {
+        const pnnx::ExportedProgram program = make_unary_program(
+            "torch.ops.aten.softmax.int", "softmax",
+            std::vector<pnnx::ExportedNamedArgument>{
+                make_input("dim", make_int(1)),
+                make_keyword_input("dtype", make_enum(pnnx::EXPORTED_ARGUMENT_SCALAR_TYPE, unsupported_values[i]))});
+        pnnx::Graph graph;
+        std::string error;
+        const int result = pnnx::lower_exported_program(program, std::map<std::string, pnnx::MaterializedExportedTensor>(), graph, error);
+
+        check(result != 0, "scalar type enum rejection", "unsupported scalar type unexpectedly lowered");
+        check(error.find("unsupported non-tensor argument dtype") != std::string::npos, "scalar type enum rejection", "wrong error " + error);
+        check(graph.ops.empty() && graph.operands.empty(), "scalar type enum rejection", "failed lowering mutated the destination graph");
+    }
+}
+
 static void test_alias_elimination()
 {
     {
@@ -1471,6 +1522,7 @@ int main(int argc, char** argv)
     test_tensor_list_argument_lowering();
     test_tensor_list_output_lowering();
     test_string_and_memory_format_argument_lowering();
+    test_scalar_type_argument_lowering();
     test_alias_elimination();
     test_lift_fresh_copy_lowering();
     test_reject_unsupported_signature_inputs();

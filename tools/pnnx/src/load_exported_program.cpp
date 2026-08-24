@@ -237,6 +237,18 @@ static int exported_memory_format_to_pnnx(int64_t value, int& converted)
     return 0;
 }
 
+static int exported_scalar_type_to_pnnx(int64_t value, int& converted)
+{
+    if (value >= 1 && value <= 12)
+        converted = (int)value - 1;
+    else if (value == 13)
+        converted = 15; // bfloat16
+    else
+        return -1;
+
+    return 0;
+}
+
 static int exported_argument_to_parameter(const ExportedArgument& argument, Parameter& parameter)
 {
     if (argument.type == EXPORTED_ARGUMENT_NONE)
@@ -274,6 +286,12 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
     {
         parameter.type = 2;
         if (exported_memory_format_to_pnnx(argument.enum_value, parameter.i) != 0)
+            return -1;
+    }
+    else if (argument.type == EXPORTED_ARGUMENT_SCALAR_TYPE)
+    {
+        parameter.type = 2;
+        if (exported_scalar_type_to_pnnx(argument.enum_value, parameter.i) != 0)
             return -1;
     }
     else
