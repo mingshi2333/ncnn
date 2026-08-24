@@ -122,11 +122,6 @@ static int validate_signature_kinds(const ExportedProgram& program, std::string&
         }
         if (spec.kind == EXPORTED_BUFFER)
         {
-            if (!spec.persistent)
-            {
-                error = "non-persistent buffer " + spec.target + " is unsupported";
-                return -1;
-            }
             if (spec.arg.type != EXPORTED_ARGUMENT_TENSOR)
             {
                 error = "buffer " + spec.target + " must be a tensor";
@@ -624,7 +619,7 @@ static int materialize_program_state(Pt2ArchiveReader& reader,
         if (spec.kind != EXPORTED_PARAMETER && spec.kind != EXPORTED_BUFFER && spec.kind != EXPORTED_TENSOR_CONSTANT)
             continue;
 
-        const bool is_constant = spec.kind == EXPORTED_TENSOR_CONSTANT;
+        const bool is_constant = spec.kind == EXPORTED_TENSOR_CONSTANT || (spec.kind == EXPORTED_BUFFER && !spec.persistent);
         const ExportedPayloadConfig& config = is_constant ? constants : weights;
         const ExportedPayloadConfig& wrong_config = is_constant ? weights : constants;
         const char* config_name = is_constant ? "constants" : "weights";

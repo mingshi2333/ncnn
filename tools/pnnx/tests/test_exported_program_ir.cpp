@@ -1615,6 +1615,19 @@ static void test_float_list_argument_lowering()
     }
 }
 
+static void test_empty_int_list_parameter_roundtrip()
+{
+    const pnnx::Parameter parsed = pnnx::Parameter::parse_from_string("[]");
+    check(parsed.type == 5 && parsed.ai.empty(), "empty int list parameter", "[] was not parsed as an empty integer list");
+
+    const pnnx::Parameter source = std::vector<int>();
+    const std::string encoded = pnnx::Parameter::encode_to_string(source);
+    check(encoded == "[]", "empty int list parameter", "empty integer list was not encoded distinctly from None");
+
+    const pnnx::Parameter roundtrip = pnnx::Parameter::parse_from_string(encoded);
+    check(roundtrip.type == 5 && roundtrip.ai.empty(), "empty int list parameter", "empty integer list changed during text roundtrip");
+}
+
 static void test_nearest_exact_vec_size_lowering()
 {
     struct NearestExactCase
@@ -1846,7 +1859,14 @@ static void test_reject_unsupported_signature_inputs()
         pnnx::ExportedProgram program = make_linear_relu_program();
         program.input_specs[0].kind = pnnx::EXPORTED_BUFFER;
         program.input_specs[0].persistent = false;
-        expect_lower_error(program, make_linear_state(), "non-persistent buffer linear.weight is unsupported", "non-persistent buffer");
+
+        pnnx::Graph graph;
+        std::string error = "stale";
+        const int result = pnnx::lower_exported_program(program, make_linear_state(), graph, error);
+        check(result == 0, "non-persistent buffer", "lowering failed: " + error);
+        check(error.empty(), "non-persistent buffer", "success retained an error");
+        check(count_operator(graph, "pnnx.Attribute") == 2, "non-persistent buffer", "buffer was not materialized as a static attribute");
+        check(count_operator(graph, "pnnx.Input") == 1, "non-persistent buffer", "buffer became a runtime input");
     }
 
     {
@@ -2142,6 +2162,7 @@ int main(int argc, char** argv)
     test_device_argument_lowering();
     test_layout_argument_lowering();
     test_float_list_argument_lowering();
+    test_empty_int_list_parameter_roundtrip();
     test_nearest_exact_vec_size_lowering();
     test_avg_pool_empty_stride_normalization();
     test_alias_elimination();

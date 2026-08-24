@@ -41,6 +41,16 @@ class BufferLinearModel(torch.nn.Module):
         return torch.relu(torch.nn.functional.linear(x, self.weight))
 
 
+class NonPersistentBufferLinearModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        weight = torch.arange(12, dtype=torch.float32).reshape(3, 4) / 10
+        self.register_buffer("weight", weight, persistent=False)
+
+    def forward(self, x):
+        return torch.relu(torch.nn.functional.linear(x, self.weight))
+
+
 class TensorConstantLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -208,6 +218,17 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 work_dir, archive_path, expected_output(model)
             )
 
+    def test_non_persistent_buffer_uses_constants_payload(self):
+        model = NonPersistentBufferLinearModel().eval()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+            archive_path = work_dir / "non_persistent_buffer.pt2"
+            save_exported_program(model, archive_path)
+
+            self.assert_conversion_matches(
+                work_dir, archive_path, expected_output(model)
+            )
+
     def test_tensor_constant_uses_constants_payload(self):
         model = TensorConstantLinearModel().eval()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -232,6 +253,12 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 "weight",
                 "weights",
                 "buffer weight is present in constants config",
+            ),
+            (
+                NonPersistentBufferLinearModel().eval(),
+                "weight",
+                "constants",
+                "buffer weight is present in weights config",
             ),
             (
                 TensorConstantLinearModel().eval(),
@@ -275,6 +302,13 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 "weights",
                 True,
                 "buffer weight in weights config has is_param=true",
+            ),
+            (
+                NonPersistentBufferLinearModel().eval(),
+                "weight",
+                "constants",
+                True,
+                "buffer weight in constants config has is_param=true",
             ),
             (
                 TensorConstantLinearModel().eval(),

@@ -52,6 +52,17 @@ class BufferModel(torch.nn.Module):
         return x + self.value
 
 
+class NonPersistentBufferModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer(
+            "value", torch.tensor([1.0, 2.0, 3.0]), persistent=False
+        )
+
+    def forward(self, x):
+        return x + self.value
+
+
 class ConstantInputModel(torch.nn.Module):
     def forward(self, x, count: int):
         return x + count
@@ -142,6 +153,20 @@ class ExportedProgramSchemaTest(unittest.TestCase):
             [
                 f"header|8|20|{torch.__version__}|10|1|0",
                 "payload|weights|value|weight_0|0|0|1|7|3|1|0|cpu|null|7|0",
+            ],
+        )
+
+    def test_real_non_persistent_buffer_config(self):
+        result = self.export_and_inspect(
+            NonPersistentBufferModel(), (torch.ones(3),)
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        self.assertEqual(
+            result.stdout.decode().splitlines(),
+            [
+                f"header|8|20|{torch.__version__}|10|0|1",
+                "payload|constants|value|tensor_0|0|0|1|7|3|1|0|cpu|null|7|0",
             ],
         )
 

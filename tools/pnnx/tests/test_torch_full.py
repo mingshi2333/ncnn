@@ -15,7 +15,8 @@ class Model(nn.Module):
         x = torch.full(x.size(), 1.5)
         y = torch.full(y.size(), 3)
         z = torch.full(z.size(), -2.2)
-        return x, y, z
+        scalar = torch.full([], 4.5)
+        return x, y, z, scalar
 
 def test():
     net = Model()

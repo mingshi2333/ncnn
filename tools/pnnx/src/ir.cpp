@@ -327,8 +327,14 @@ Parameter Parameter::parse_from_string(const std::string& value)
     Parameter p;
     p.type = 0;
 
-    if (value == "None" || value == "()" || value == "[]")
+    if (value == "None" || value == "()")
     {
+        return p;
+    }
+
+    if (value == "[]")
+    {
+        p.type = 5;
         return p;
     }
 
@@ -422,6 +428,9 @@ std::string Parameter::encode_to_string(const Parameter& param)
     }
     if (param.type == 5)
     {
+        if (param.ai.empty())
+            return std::string("[]");
+
         std::string s("(");
         for (size_t i = 0; i < param.ai.size(); i++)
         {
