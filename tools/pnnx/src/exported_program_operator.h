@@ -11,8 +11,9 @@
 
 namespace pnnx {
 
-struct ExportedAtenTarget
+struct ExportedOperatorTarget
 {
+    std::string namespace_name;
     std::string operator_name;
     std::string overload_name;
 };
@@ -23,7 +24,7 @@ struct CanonicalExportedArgument
     ExportedArgument value;
 };
 
-int parse_exported_aten_target(const std::string& target, ExportedAtenTarget& result, std::string& error);
+int parse_exported_operator_target(const std::string& target, ExportedOperatorTarget& result, std::string& error);
 
 int canonicalize_exported_arguments(const ExportedNode& node,
                                     const ExportedProgramHeader& header,

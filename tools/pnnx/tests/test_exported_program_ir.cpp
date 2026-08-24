@@ -1009,6 +1009,125 @@ static pnnx::ExportedProgram make_weight_norm_program(bool static_weight)
     return program;
 }
 
+static pnnx::ExportedProgram make_torchvision_deform_conv2d_program(bool use_mask)
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("p_weight"));
+    program.graph.inputs.push_back(make_tensor("p_bias"));
+    program.graph.inputs.push_back(make_tensor("x"));
+    program.graph.inputs.push_back(make_tensor("offset"));
+    program.graph.inputs.push_back(make_tensor("mask"));
+
+    pnnx::ExportedNode deform_conv2d;
+    deform_conv2d.name = "deform_conv2d";
+    deform_conv2d.has_name = true;
+    deform_conv2d.target = "torch.ops.torchvision.deform_conv2d.default";
+    deform_conv2d.inputs.push_back(make_input("input", "x"));
+    deform_conv2d.inputs.push_back(make_input("weight", "p_weight"));
+    deform_conv2d.inputs.push_back(make_input("offset", "offset"));
+    deform_conv2d.inputs.push_back(make_input("mask", "mask"));
+    deform_conv2d.inputs.push_back(make_input("bias", "p_bias"));
+    deform_conv2d.inputs.push_back(make_input("stride_h", make_int(2)));
+    deform_conv2d.inputs.push_back(make_input("stride_w", make_int(1)));
+    deform_conv2d.inputs.push_back(make_input("pad_h", make_int(1)));
+    deform_conv2d.inputs.push_back(make_input("pad_w", make_int(2)));
+    deform_conv2d.inputs.push_back(make_input("dilation_h", make_int(1)));
+    deform_conv2d.inputs.push_back(make_input("dilation_w", make_int(2)));
+    deform_conv2d.inputs.push_back(make_input("groups", make_int(2)));
+    deform_conv2d.inputs.push_back(make_input("offset_groups", make_int(1)));
+    deform_conv2d.inputs.push_back(make_input("use_mask", make_bool(use_mask)));
+    deform_conv2d.outputs.push_back(make_tensor("out"));
+    program.graph.nodes.push_back(deform_conv2d);
+    program.graph.outputs.push_back(make_tensor("out"));
+
+    program.graph.tensor_values["p_weight"] = make_tensor_meta(std::vector<int64_t>{16, 6, 3, 5});
+    program.graph.tensor_values["p_bias"] = make_tensor_meta(std::vector<int64_t>{16});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 12, 32, 32});
+    program.graph.tensor_values["offset"] = make_tensor_meta(std::vector<int64_t>{1, 30, 16, 28});
+    program.graph.tensor_values["mask"] = make_tensor_meta(use_mask ? std::vector<int64_t>{1, 15, 16, 28} : std::vector<int64_t>{1, 1});
+    program.graph.tensor_values["out"] = make_tensor_meta(std::vector<int64_t>{1, 16, 16, 28});
+
+    pnnx::ExportedInputSpec weight;
+    weight.kind = pnnx::EXPORTED_PARAMETER;
+    weight.arg = make_tensor("p_weight");
+    weight.target = "deform.weight";
+    program.input_specs.push_back(weight);
+
+    pnnx::ExportedInputSpec bias;
+    bias.kind = pnnx::EXPORTED_PARAMETER;
+    bias.arg = make_tensor("p_bias");
+    bias.target = "deform.bias";
+    program.input_specs.push_back(bias);
+
+    const std::vector<std::string> user_inputs = {"x", "offset", "mask"};
+    for (size_t i = 0; i < user_inputs.size(); i++)
+    {
+        pnnx::ExportedInputSpec input;
+        input.kind = pnnx::EXPORTED_USER_INPUT;
+        input.arg = make_tensor(user_inputs[i]);
+        program.input_specs.push_back(input);
+    }
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("out");
+    program.output_specs.push_back(output);
+    return program;
+}
+
+static pnnx::ExportedProgram make_torchvision_roi_align_program()
+{
+    pnnx::ExportedProgram program;
+    program.header.schema_major = 8;
+    program.header.schema_minor = 20;
+    program.header.torch_version = "2.12.1+cu126";
+    program.header.opset_version["aten"] = 10;
+
+    program.graph.inputs.push_back(make_tensor("p_rois"));
+    program.graph.inputs.push_back(make_tensor("x"));
+
+    pnnx::ExportedNode roi_align;
+    roi_align.name = "roi_align";
+    roi_align.has_name = true;
+    roi_align.target = "torch.ops.torchvision.roi_align.default";
+    roi_align.inputs.push_back(make_input("input", "x"));
+    roi_align.inputs.push_back(make_input("rois", "p_rois"));
+    roi_align.inputs.push_back(make_input("spatial_scale", make_float(0.25)));
+    roi_align.inputs.push_back(make_input("pooled_height", make_int(3)));
+    roi_align.inputs.push_back(make_input("pooled_width", make_int(5)));
+    roi_align.inputs.push_back(make_input("sampling_ratio", make_int(2)));
+    roi_align.inputs.push_back(make_input("aligned", make_bool(true)));
+    roi_align.outputs.push_back(make_tensor("out"));
+    program.graph.nodes.push_back(roi_align);
+    program.graph.outputs.push_back(make_tensor("out"));
+
+    program.graph.tensor_values["p_rois"] = make_tensor_meta(std::vector<int64_t>{2, 5});
+    program.graph.tensor_values["x"] = make_tensor_meta(std::vector<int64_t>{1, 12, 64, 64});
+    program.graph.tensor_values["out"] = make_tensor_meta(std::vector<int64_t>{2, 12, 3, 5});
+
+    pnnx::ExportedInputSpec rois;
+    rois.kind = pnnx::EXPORTED_PARAMETER;
+    rois.arg = make_tensor("p_rois");
+    rois.target = "roi_align.rois";
+    program.input_specs.push_back(rois);
+
+    pnnx::ExportedInputSpec input;
+    input.kind = pnnx::EXPORTED_USER_INPUT;
+    input.arg = make_tensor("x");
+    program.input_specs.push_back(input);
+
+    pnnx::ExportedOutputSpec output;
+    output.kind = pnnx::EXPORTED_USER_OUTPUT;
+    output.arg = make_tensor("out");
+    program.output_specs.push_back(output);
+    return program;
+}
+
 static pnnx::Operator* find_operator(pnnx::Graph& graph, const std::string& type)
 {
     for (size_t i = 0; i < graph.ops.size(); i++)
@@ -1082,6 +1201,69 @@ static void test_linear_relu_graph()
     pnnx::pass_level2(graph);
     check(count_operator(graph, "aten::linear") == 0 && count_operator(graph, "F.linear") == 1, "linear relu pass level2", "linear was not canonicalized");
     check(count_operator(graph, "aten::relu") == 0 && count_operator(graph, "F.relu") == 1, "linear relu pass level2", "relu was not canonicalized");
+}
+
+static void test_torchvision_custom_operator_lowering()
+{
+    for (int use_mask = 0; use_mask < 2; use_mask++)
+    {
+        const pnnx::ExportedProgram program = make_torchvision_deform_conv2d_program(use_mask != 0);
+        std::map<std::string, pnnx::MaterializedExportedTensor> state;
+        state["deform.weight"] = make_state_tensor(std::vector<int>{16, 6, 3, 5}, 16 * 6 * 3 * 5 * 4);
+        state["deform.bias"] = make_state_tensor(std::vector<int>{16}, 16 * 4);
+
+        pnnx::Graph graph;
+        std::string error = "stale";
+        const int result = pnnx::lower_exported_program(program, state, graph, error);
+        check(result == 0, "torchvision deform lower", "lowering failed: " + error);
+        check(error.empty(), "torchvision deform lower", "success retained an error");
+        if (result != 0)
+            continue;
+
+        pnnx::Operator* raw = find_operator(graph, "torchvision::deform_conv2d");
+        check(raw && raw->inputs.size() == 14, "torchvision deform lower", "raw deform_conv2d was not preserved");
+        check(raw && raw->inputnames == std::vector<std::string>({"input", "weight", "offset", "mask", "bias", "stride_h", "stride_w", "pad_h", "pad_w", "dilation_h", "dilation_w", "groups", "offset_groups", "use_mask"}), "torchvision deform lower", "raw argument order changed");
+
+        pnnx::pass_level2(graph);
+        pnnx::Operator* module = find_operator(graph, "torchvision.ops.DeformConv2d");
+        check(find_operator(graph, "torchvision::deform_conv2d") == 0 && module != 0, "torchvision deform pass level2", "deform_conv2d was not canonicalized");
+        check(module && module->inputs.size() == (use_mask ? 3u : 2u), "torchvision deform pass level2", "mask input contract changed");
+        check(module && module->has_param("in_channels") && module->params.at("in_channels").i == 12, "torchvision deform pass level2", "in_channels changed");
+        check(module && module->has_param("out_channels") && module->params.at("out_channels").i == 16, "torchvision deform pass level2", "out_channels changed");
+        check(module && module->has_param("kernel_size") && module->params.at("kernel_size").ai == std::vector<int>({3, 5}), "torchvision deform pass level2", "kernel_size changed");
+        check(module && module->has_param("stride") && module->params.at("stride").ai == std::vector<int>({2, 1}), "torchvision deform pass level2", "stride changed");
+        check(module && module->has_param("padding") && module->params.at("padding").ai == std::vector<int>({1, 2}), "torchvision deform pass level2", "padding changed");
+        check(module && module->has_param("dilation") && module->params.at("dilation").ai == std::vector<int>({1, 2}), "torchvision deform pass level2", "dilation changed");
+        check(module && module->has_param("groups") && module->params.at("groups").i == 2, "torchvision deform pass level2", "groups changed");
+        check(module && module->has_param("bias") && module->params.at("bias").b, "torchvision deform pass level2", "bias flag changed");
+        check(module && module->has_attr("weight") && module->attrs.at("weight").shape == std::vector<int>({16, 6, 3, 5}), "torchvision deform pass level2", "weight attribute changed");
+        check(module && module->has_attr("bias") && module->attrs.at("bias").shape == std::vector<int>({16}), "torchvision deform pass level2", "bias attribute changed");
+    }
+
+    const pnnx::ExportedProgram program = make_torchvision_roi_align_program();
+    std::map<std::string, pnnx::MaterializedExportedTensor> state;
+    state["roi_align.rois"] = make_state_tensor(std::vector<int>{2, 5}, 2 * 5 * 4);
+
+    pnnx::Graph graph;
+    std::string error = "stale";
+    const int result = pnnx::lower_exported_program(program, state, graph, error);
+    check(result == 0, "torchvision roi align lower", "lowering failed: " + error);
+    check(error.empty(), "torchvision roi align lower", "success retained an error");
+    if (result != 0)
+        return;
+
+    pnnx::Operator* raw = find_operator(graph, "torchvision::roi_align");
+    check(raw && raw->inputs.size() == 7, "torchvision roi align lower", "raw roi_align was not preserved");
+    check(raw && raw->inputnames == std::vector<std::string>({"input", "rois", "spatial_scale", "pooled_height", "pooled_width", "sampling_ratio", "aligned"}), "torchvision roi align lower", "raw argument order changed");
+
+    pnnx::pass_level2(graph);
+    pnnx::Operator* module = find_operator(graph, "torchvision.ops.RoIAlign");
+    check(find_operator(graph, "torchvision::roi_align") == 0 && module != 0, "torchvision roi align pass level2", "roi_align was not canonicalized");
+    check(module && module->inputs.size() == 2, "torchvision roi align pass level2", "roi_align input contract changed");
+    check(module && module->has_param("output_size") && module->params.at("output_size").ai == std::vector<int>({3, 5}), "torchvision roi align pass level2", "output_size changed");
+    check(module && module->has_param("spatial_scale") && module->params.at("spatial_scale").f == 0.25f, "torchvision roi align pass level2", "spatial_scale changed");
+    check(module && module->has_param("sampling_ratio") && module->params.at("sampling_ratio").i == 2, "torchvision roi align pass level2", "sampling_ratio changed");
+    check(module && module->has_param("aligned") && module->params.at("aligned").b, "torchvision roi align pass level2", "aligned changed");
 }
 
 static void test_bounded_dynamic_result_shape()
@@ -2783,6 +2965,7 @@ int main(int argc, char** argv)
         return 2;
 
     test_linear_relu_graph();
+    test_torchvision_custom_operator_lowering();
     test_bounded_dynamic_result_shape();
     test_dynamic_input_shape();
     test_higher_order_graph_lowering();

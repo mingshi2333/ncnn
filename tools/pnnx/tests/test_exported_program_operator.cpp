@@ -178,29 +178,31 @@ static bool same_argument(const pnnx::ExportedArgument& actual, const pnnx::Expo
 
 static void expect_target(const std::string& serialized, const std::string& operator_name, const std::string& overload_name)
 {
-    pnnx::ExportedAtenTarget target;
+    pnnx::ExportedOperatorTarget target;
     target.operator_name = "stale";
     target.overload_name = "stale";
     std::string error = "stale";
 
-    const int result = pnnx::parse_exported_aten_target(serialized, target, error);
+    const int result = pnnx::parse_exported_operator_target(serialized, target, error);
     check(result == 0, "target parse", serialized + " failed: " + error);
     check(error.empty(), "target parse", serialized + " retained an error");
+    const size_t namespace_separator = operator_name.find("::");
+    check(target.namespace_name == operator_name.substr(0, namespace_separator), "target parse", serialized + " has wrong namespace");
     check(target.operator_name == operator_name, "target parse", serialized + " has wrong operator name");
     check(target.overload_name == overload_name, "target parse", serialized + " has wrong overload name");
 }
 
 static void expect_target_error(const std::string& serialized, const std::string& expected_error)
 {
-    pnnx::ExportedAtenTarget target;
+    pnnx::ExportedOperatorTarget target;
     target.operator_name = "stale";
     target.overload_name = "stale";
     std::string error = "stale";
 
-    const int result = pnnx::parse_exported_aten_target(serialized, target, error);
+    const int result = pnnx::parse_exported_operator_target(serialized, target, error);
     check(result != 0, "target error", serialized + " unexpectedly parsed");
     check(error.find(expected_error) != std::string::npos, "target error", serialized + " has wrong error " + error);
-    check(target.operator_name.empty() && target.overload_name.empty(), "target error", serialized + " retained partial output");
+    check(target.namespace_name.empty() && target.operator_name.empty() && target.overload_name.empty(), "target error", serialized + " retained partial output");
 }
 
 static void expect_canonical(const pnnx::ExportedNode& node, const std::vector<pnnx::CanonicalExportedArgument>& expected, const char* name)
@@ -245,16 +247,87 @@ static void test_targets()
     expect_target("torch.ops.aten.add.Tensor", "aten::add", "Tensor");
     expect_target("torch.ops.aten.flatten.using_ints", "aten::flatten", "using_ints");
     expect_target("torch.ops.aten._to_copy.default", "aten::_to_copy", "");
+    expect_target("torch.ops.torchvision.deform_conv2d.default", "torchvision::deform_conv2d", "");
+    expect_target("torch.ops.torchvision.roi_align.default", "torchvision::roi_align", "");
 
     expect_target_error("", "must start");
-    expect_target_error("torch.ops.custom.foo.default", "must start");
     expect_target_error("aten.add.Tensor", "must start");
     expect_target_error("torch.ops.aten.add", "operator and overload");
+    expect_target_error("torch.ops..add.default", "invalid namespace");
     expect_target_error("torch.ops.aten..default", "invalid operator name");
     expect_target_error("torch.ops.aten.add.", "invalid overload name");
     expect_target_error("torch.ops.aten.add.Tensor.extra", "invalid operator name");
     expect_target_error("torch.ops.aten.add.Tensor-1", "invalid overload name");
+}
 
+static void test_torchvision_arguments()
+{
+    const pnnx::ExportedArgument input = make_tensor("input");
+    const pnnx::ExportedArgument weight = make_tensor("weight");
+    const pnnx::ExportedArgument offset = make_tensor("offset");
+    const pnnx::ExportedArgument mask = make_tensor("mask");
+    const pnnx::ExportedArgument bias = make_tensor("bias");
+    const pnnx::ExportedArgument rois = make_tensor("rois");
+
+    const std::vector<pnnx::ExportedNamedArgument> deform_inputs = {
+        make_input("input", input, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("weight", weight, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("offset", offset, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("mask", mask, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("bias", bias, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("stride_h", make_int(1), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("stride_w", make_int(1), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("pad_h", make_int(0), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("pad_w", make_int(0), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("dilation_h", make_int(1), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("dilation_w", make_int(1), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("groups", make_int(1), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("offset_groups", make_int(1), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("use_mask", make_bool(true), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+    };
+    const std::vector<pnnx::CanonicalExportedArgument> deform_expected = {
+        make_expected("input", input),
+        make_expected("weight", weight),
+        make_expected("offset", offset),
+        make_expected("mask", mask),
+        make_expected("bias", bias),
+        make_expected("stride_h", make_int(1)),
+        make_expected("stride_w", make_int(1)),
+        make_expected("pad_h", make_int(0)),
+        make_expected("pad_w", make_int(0)),
+        make_expected("dilation_h", make_int(1)),
+        make_expected("dilation_w", make_int(1)),
+        make_expected("groups", make_int(1)),
+        make_expected("offset_groups", make_int(1)),
+        make_expected("use_mask", make_bool(true)),
+    };
+    expect_canonical(make_node("torch.ops.torchvision.deform_conv2d.default", deform_inputs), deform_expected, "torchvision deform conv arguments");
+
+    const std::vector<pnnx::ExportedNamedArgument> roi_inputs = {
+        make_input("input", input, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("rois", rois, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("spatial_scale", make_float(0.25), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("pooled_height", make_int(3), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("pooled_width", make_int(3), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("sampling_ratio", make_int(3), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+        make_input("aligned", make_bool(false), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+    };
+    const std::vector<pnnx::CanonicalExportedArgument> roi_expected = {
+        make_expected("input", input),
+        make_expected("rois", rois),
+        make_expected("spatial_scale", make_float(0.25)),
+        make_expected("pooled_height", make_int(3)),
+        make_expected("pooled_width", make_int(3)),
+        make_expected("sampling_ratio", make_int(3)),
+        make_expected("aligned", make_bool(false)),
+    };
+    expect_canonical(make_node("torch.ops.torchvision.roi_align.default", roi_inputs), roi_expected, "torchvision roi align arguments");
+
+    expect_canonical_error(make_node("torch.ops.custom.foo.default", std::vector<pnnx::ExportedNamedArgument>()), make_header(), "unsupported exported operator", "unknown custom operator");
+
+    std::vector<pnnx::ExportedNamedArgument> invalid_roi_inputs = roi_inputs;
+    invalid_roi_inputs[2].arg = make_int(1);
+    expect_canonical_error(make_node("torch.ops.torchvision.roi_align.default", invalid_roi_inputs), make_header(), "spatial_scale", "torchvision argument type");
 }
 
 static void test_default_arguments()
@@ -298,8 +371,8 @@ static void test_default_arguments()
 
     expect_canonical(
         make_node("torch.ops.aten.sub.Tensor", std::vector<pnnx::ExportedNamedArgument>{
-                                                     make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
-                                                     make_input("other", make_complex(0.0, 4.0), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
+                                                   make_input("self", x, pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL),
+                                                   make_input("other", make_complex(0.0, 4.0), pnnx::EXPORTED_ARGUMENT_KIND_POSITIONAL)}),
         std::vector<pnnx::CanonicalExportedArgument>{make_expected("self", x), make_expected("other", make_complex(0.0, 4.0)), make_expected("alpha", make_int(1))}, "complex scalar");
 
     expect_canonical(
@@ -489,8 +562,8 @@ static int inspect_package(const char* path)
     for (size_t i = 0; i < program.graph.nodes.size(); i++)
     {
         const pnnx::ExportedNode& node = program.graph.nodes[i];
-        pnnx::ExportedAtenTarget target;
-        if (pnnx::parse_exported_aten_target(node.target, target, error) != 0)
+        pnnx::ExportedOperatorTarget target;
+        if (pnnx::parse_exported_operator_target(node.target, target, error) != 0)
         {
             fprintf(stderr, "%s\n", error.c_str());
             return 1;
@@ -524,6 +597,7 @@ int main(int argc, char** argv)
         return 2;
 
     test_targets();
+    test_torchvision_arguments();
     test_default_arguments();
     test_binding_order_and_legacy_kind();
     test_binding_errors();

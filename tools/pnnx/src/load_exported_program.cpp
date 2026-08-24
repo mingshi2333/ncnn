@@ -603,7 +603,7 @@ static int exported_argument_to_parameter(const ExportedArgument& argument, Para
     return 0;
 }
 
-static void normalize_exported_slice_arguments(const ExportedAtenTarget& target, std::vector<CanonicalExportedArgument>& arguments)
+static void normalize_exported_slice_arguments(const ExportedOperatorTarget& target, std::vector<CanonicalExportedArgument>& arguments)
 {
     if (target.operator_name != "aten::slice" || target.overload_name != "Tensor")
         return;
@@ -745,8 +745,8 @@ int lower_exported_program(const ExportedProgram& source_program,
         if (canonicalize_exported_arguments(node, program.header, arguments, error) != 0)
             return -1;
 
-        ExportedAtenTarget target;
-        if (parse_exported_aten_target(node.target, target, error) != 0)
+        ExportedOperatorTarget target;
+        if (parse_exported_operator_target(node.target, target, error) != 0)
             return -1;
         normalize_exported_slice_arguments(target, arguments);
 

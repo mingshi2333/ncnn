@@ -39,28 +39,35 @@ static bool is_identifier(const std::string& value)
     return true;
 }
 
-int parse_exported_aten_target(const std::string& target, ExportedAtenTarget& result, std::string& error)
+int parse_exported_operator_target(const std::string& target, ExportedOperatorTarget& result, std::string& error)
 {
-    result = ExportedAtenTarget();
+    result = ExportedOperatorTarget();
     error.clear();
 
-    const std::string prefix = "torch.ops.aten.";
+    const std::string prefix = "torch.ops.";
     if (target.compare(0, prefix.size(), prefix) != 0)
     {
-        error = "exported operator target must start with torch.ops.aten.";
+        error = "exported operator target must start with torch.ops.";
         return -1;
     }
 
     const std::string qualified_name = target.substr(prefix.size());
-    const size_t separator = qualified_name.rfind('.');
-    if (separator == std::string::npos)
+    const size_t namespace_separator = qualified_name.find('.');
+    const size_t overload_separator = qualified_name.rfind('.');
+    if (namespace_separator == std::string::npos || namespace_separator == overload_separator)
     {
-        error = "exported operator target must contain operator and overload";
+        error = "exported operator target must contain namespace, operator and overload";
         return -1;
     }
 
-    const std::string operator_part = qualified_name.substr(0, separator);
-    const std::string overload_part = qualified_name.substr(separator + 1);
+    const std::string namespace_part = qualified_name.substr(0, namespace_separator);
+    const std::string operator_part = qualified_name.substr(namespace_separator + 1, overload_separator - namespace_separator - 1);
+    const std::string overload_part = qualified_name.substr(overload_separator + 1);
+    if (!is_identifier(namespace_part))
+    {
+        error = "invalid namespace in exported target";
+        return -1;
+    }
     if (!is_identifier(operator_part))
     {
         error = "invalid operator name in exported target";
@@ -72,8 +79,9 @@ int parse_exported_aten_target(const std::string& target, ExportedAtenTarget& re
         return -1;
     }
 
-    ExportedAtenTarget parsed_target;
-    parsed_target.operator_name = "aten::" + operator_part;
+    ExportedOperatorTarget parsed_target;
+    parsed_target.namespace_name = namespace_part;
+    parsed_target.operator_name = namespace_part + "::" + operator_part;
     if (overload_part != "default")
         parsed_target.overload_name = overload_part;
 
@@ -424,6 +432,154 @@ static int canonicalize_with_schema(const ExportedNode& node,
 
 #endif
 
+enum ExportedCustomArgumentType
+{
+    EXPORTED_CUSTOM_TENSOR,
+    EXPORTED_CUSTOM_INT,
+    EXPORTED_CUSTOM_SYM_INT,
+    EXPORTED_CUSTOM_FLOAT,
+    EXPORTED_CUSTOM_BOOL
+};
+
+struct ExportedCustomArgument
+{
+    const char* name;
+    ExportedCustomArgumentType type;
+};
+
+static const ExportedCustomArgument torchvision_deform_conv2d_arguments[] = {
+    {"input", EXPORTED_CUSTOM_TENSOR},
+    {"weight", EXPORTED_CUSTOM_TENSOR},
+    {"offset", EXPORTED_CUSTOM_TENSOR},
+    {"mask", EXPORTED_CUSTOM_TENSOR},
+    {"bias", EXPORTED_CUSTOM_TENSOR},
+    {"stride_h", EXPORTED_CUSTOM_SYM_INT},
+    {"stride_w", EXPORTED_CUSTOM_SYM_INT},
+    {"pad_h", EXPORTED_CUSTOM_SYM_INT},
+    {"pad_w", EXPORTED_CUSTOM_SYM_INT},
+    {"dilation_h", EXPORTED_CUSTOM_SYM_INT},
+    {"dilation_w", EXPORTED_CUSTOM_SYM_INT},
+    {"groups", EXPORTED_CUSTOM_SYM_INT},
+    {"offset_groups", EXPORTED_CUSTOM_SYM_INT},
+    {"use_mask", EXPORTED_CUSTOM_BOOL},
+};
+
+static const ExportedCustomArgument torchvision_roi_align_arguments[] = {
+    {"input", EXPORTED_CUSTOM_TENSOR},
+    {"rois", EXPORTED_CUSTOM_TENSOR},
+    {"spatial_scale", EXPORTED_CUSTOM_FLOAT},
+    {"pooled_height", EXPORTED_CUSTOM_SYM_INT},
+    {"pooled_width", EXPORTED_CUSTOM_SYM_INT},
+    {"sampling_ratio", EXPORTED_CUSTOM_INT},
+    {"aligned", EXPORTED_CUSTOM_BOOL},
+};
+
+static const char* custom_argument_type_name(ExportedCustomArgumentType type)
+{
+    if (type == EXPORTED_CUSTOM_TENSOR)
+        return "Tensor";
+    if (type == EXPORTED_CUSTOM_INT)
+        return "int";
+    if (type == EXPORTED_CUSTOM_SYM_INT)
+        return "SymInt";
+    if (type == EXPORTED_CUSTOM_FLOAT)
+        return "float";
+    return "bool";
+}
+
+static bool custom_argument_type_matches(ExportedCustomArgumentType expected, ExportedArgumentType actual)
+{
+    if (expected == EXPORTED_CUSTOM_TENSOR)
+        return actual == EXPORTED_ARGUMENT_TENSOR;
+    if (expected == EXPORTED_CUSTOM_INT)
+        return actual == EXPORTED_ARGUMENT_INT;
+    if (expected == EXPORTED_CUSTOM_SYM_INT)
+        return actual == EXPORTED_ARGUMENT_INT || actual == EXPORTED_ARGUMENT_SYMBOLIC_INT;
+    if (expected == EXPORTED_CUSTOM_FLOAT)
+        return actual == EXPORTED_ARGUMENT_FLOAT;
+    return actual == EXPORTED_ARGUMENT_BOOL;
+}
+
+static int canonicalize_with_custom_schema(const ExportedNode& node,
+                                           const ExportedProgramHeader& header,
+                                           const ExportedCustomArgument* schema_arguments,
+                                           size_t schema_argument_count,
+                                           std::vector<CanonicalExportedArgument>& result,
+                                           std::string& error)
+{
+    std::map<std::string, size_t> schema_indices;
+    for (size_t i = 0; i < schema_argument_count; i++)
+        schema_indices[schema_arguments[i].name] = i;
+
+    bool has_missing_kind = false;
+    bool has_explicit_kind = false;
+    for (size_t i = 0; i < node.inputs.size(); i++)
+    {
+        if (node.inputs[i].kind == EXPORTED_ARGUMENT_KIND_UNKNOWN)
+            return operator_error(header, node, "unknown argument kind for " + node.inputs[i].name, error);
+        if (node.inputs[i].kind == EXPORTED_ARGUMENT_KIND_MISSING)
+            has_missing_kind = true;
+        else
+            has_explicit_kind = true;
+    }
+    if (has_missing_kind && has_explicit_kind)
+        return operator_error(header, node, "node mixes legacy and explicit argument kinds", error);
+
+    std::vector<const ExportedNamedArgument*> bound_arguments(schema_argument_count, 0);
+    bool saw_keyword = false;
+    size_t next_positional = 0;
+    for (size_t i = 0; i < node.inputs.size(); i++)
+    {
+        const ExportedNamedArgument& input = node.inputs[i];
+        const std::map<std::string, size_t>::const_iterator schema_index_it = schema_indices.find(input.name);
+        if (schema_index_it == schema_indices.end())
+            return operator_error(header, node, "unknown argument " + input.name, error);
+
+        const size_t schema_index = schema_index_it->second;
+        if (bound_arguments[schema_index])
+            return operator_error(header, node, "duplicate argument " + input.name, error);
+
+        if (!has_missing_kind && input.kind == EXPORTED_ARGUMENT_KIND_POSITIONAL)
+        {
+            if (saw_keyword)
+                return operator_error(header, node, "positional argument " + input.name + " follows a keyword argument", error);
+            if (schema_index != next_positional)
+            {
+                const std::string expected_name = next_positional < schema_argument_count ? schema_arguments[next_positional].name : std::string("<none>");
+                return operator_error(header, node, "expected positional argument " + expected_name + " but found " + input.name, error);
+            }
+            next_positional++;
+        }
+        else if (!has_missing_kind && input.kind == EXPORTED_ARGUMENT_KIND_KEYWORD)
+        {
+            saw_keyword = true;
+        }
+
+        if (input.arg.type == EXPORTED_ARGUMENT_UNSUPPORTED)
+            return operator_error(header, node, "unsupported serialized argument " + input.arg.unsupported_tag + " for " + input.name, error);
+        if (!custom_argument_type_matches(schema_arguments[schema_index].type, input.arg.type))
+            return operator_error(header, node, "argument " + input.name + " must be " + custom_argument_type_name(schema_arguments[schema_index].type), error);
+
+        bound_arguments[schema_index] = &input;
+    }
+
+    std::vector<CanonicalExportedArgument> canonical_arguments;
+    canonical_arguments.reserve(schema_argument_count);
+    for (size_t i = 0; i < schema_argument_count; i++)
+    {
+        if (!bound_arguments[i])
+            return operator_error(header, node, "missing required argument " + std::string(schema_arguments[i].name), error);
+
+        CanonicalExportedArgument argument;
+        argument.name = schema_arguments[i].name;
+        argument.value = bound_arguments[i]->arg;
+        canonical_arguments.push_back(argument);
+    }
+
+    result.swap(canonical_arguments);
+    return 0;
+}
+
 int canonicalize_exported_arguments(const ExportedNode& node,
                                     const ExportedProgramHeader& header,
                                     std::vector<CanonicalExportedArgument>& result,
@@ -432,10 +588,19 @@ int canonicalize_exported_arguments(const ExportedNode& node,
     result.clear();
     error.clear();
 
-    ExportedAtenTarget target;
+    ExportedOperatorTarget target;
     std::string target_error;
-    if (parse_exported_aten_target(node.target, target, target_error) != 0)
+    if (parse_exported_operator_target(node.target, target, target_error) != 0)
         return operator_error(header, node, target_error, error);
+
+    if (target.namespace_name == "torchvision" && target.operator_name == "torchvision::deform_conv2d" && target.overload_name.empty())
+        return canonicalize_with_custom_schema(node, header, torchvision_deform_conv2d_arguments, sizeof(torchvision_deform_conv2d_arguments) / sizeof(torchvision_deform_conv2d_arguments[0]), result, error);
+
+    if (target.namespace_name == "torchvision" && target.operator_name == "torchvision::roi_align" && target.overload_name.empty())
+        return canonicalize_with_custom_schema(node, header, torchvision_roi_align_arguments, sizeof(torchvision_roi_align_arguments) / sizeof(torchvision_roi_align_arguments[0]), result, error);
+
+    if (target.namespace_name != "aten")
+        return operator_error(header, node, "unsupported exported operator " + node.target, error);
 
     const std::map<std::string, int64_t>::const_iterator aten_opset = header.opset_version.find("aten");
     if (aten_opset == header.opset_version.end())
