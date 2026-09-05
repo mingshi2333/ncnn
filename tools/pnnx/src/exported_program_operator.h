@@ -24,6 +24,12 @@ struct CanonicalExportedArgument
     ExportedArgument value;
 };
 
+struct ExportedOperatorEffects
+{
+    std::vector<size_t> mutable_input_indices;
+    std::vector<std::vector<size_t> > output_alias_input_indices;
+};
+
 int parse_exported_operator_target(const std::string& target, ExportedOperatorTarget& result, std::string& error);
 
 int validate_exported_program_opset(const ExportedProgramHeader& header, std::string& error);
@@ -32,6 +38,7 @@ int canonicalize_exported_arguments(const ExportedNode& node,
                                     const ExportedProgramHeader& header,
                                     ExportedOperatorTarget& target,
                                     std::vector<CanonicalExportedArgument>& result,
+                                    ExportedOperatorEffects& effects,
                                     std::string& error);
 
 } // namespace pnnx

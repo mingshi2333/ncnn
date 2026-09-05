@@ -425,6 +425,189 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 f"failed conversion left {model_path.stem}{suffix}",
             )
 
+    def test_external_mutations_are_rejected(self):
+        class ExternalMutation(torch.nn.Module):
+            def __init__(self, buffer, view):
+                super().__init__()
+                self.buffer = buffer
+                self.view = view
+                self.register_buffer("state", torch.arange(12).float().reshape(3, 4))
+
+            def forward(self, x):
+                value = self.state if self.buffer else x
+                alias = value.view(3, 4) if self.view else value
+                alias.add_(10)
+                return value.clone()
+
+        initial = torch.arange(12).float().reshape(3, 4)
+        for buffer in (False, True):
+            for view in (False, True):
+                with self.subTest(buffer=buffer, view=view), tempfile.TemporaryDirectory() as temp_dir:
+                    work_dir = Path(temp_dir)
+                    archive_path = work_dir / "external.pt2"
+                    model = ExternalMutation(buffer, view).eval()
+                    saved_state = model.state.clone()
+                    oracle = ExternalMutation(buffer, view).eval()
+                    oracle.state.copy_(saved_state)
+                    expected = oracle(initial.clone())
+                    self.assertTrue(torch.equal(expected, initial + 10))
+                    save_exported_program(model, archive_path, (initial.clone(),))
+                    loaded = torch.export.load(archive_path).module()
+                    if buffer:
+                        loaded.state.copy_(saved_state)
+                    self.assert_nested_close(expected, loaded(initial.clone()))
+                    self.assert_conversion_fails(
+                        work_dir, archive_path, "mutation", "argument self",
+                        "torch.ops.aten.add_.Tensor", "buffer" if buffer else "user-input",
+                    )
+
+    def test_local_alias_updates_preserve_values(self):
+        class LocalAlias(torch.nn.Module):
+            def __init__(self, identity=True):
+                super().__init__()
+                self.identity = identity
+
+            def forward(self, x):
+                y = x.clone()
+                a = torch.ops.aten.alias(y) if self.identity else y
+                before = a.clone()
+                a[:, 1:3].add_(10)
+                return before, y + a, a, y
+
+        class LocalRelu(torch.nn.Module):
+            def forward(self, x):
+                tmp = x * 2 - 1
+                return torch.relu_(tmp)
+
+        class LocalCopy(torch.nn.Module):
+            def __init__(self, kind):
+                super().__init__()
+                self.kind = kind
+
+            def forward(self, x):
+                before = x.clone()
+                if self.kind == "alias_only":
+                    return torch.ops.aten.alias(x), before
+                if self.kind == "to_copy":
+                    y = torch.ops.aten.to.dtype(x, torch.float32, False, True)
+                elif self.kind == "to_dtype":
+                    y = torch.ops.aten.to.dtype(x, torch.float64)
+                elif self.kind == "cat":
+                    y = torch.cat([x, x.clone()])
+                else:
+                    y = x.clone()
+                    if self.kind == "reshape":
+                        y = y.transpose(0, 1).reshape(-1)
+                    elif self.kind == "flatten":
+                        y = y.transpose(0, 1).flatten()
+                    elif self.kind == "split":
+                        y = y.split(2, dim=1)[0]
+                    elif self.kind == "contiguous_copy":
+                        y = y.transpose(0, 1).contiguous()
+                    elif self.kind == "contiguous_same":
+                        y = y.contiguous()
+                    elif self.kind == "to_same":
+                        y = torch.ops.aten.to.dtype(y, torch.float32)
+                y.add_(1)
+                return before, y
+
+        original = torch.arange(12).float().reshape(3, 4)
+        models = [("alias", LocalAlias()), ("direct", LocalAlias(False)), ("relu", LocalRelu())]
+        models += [(kind, LocalCopy(kind)) for kind in (
+            "clone", "alias_only", "reshape", "flatten", "split", "to_copy", "to_dtype",
+            "to_same", "contiguous_copy", "contiguous_same", "cat",
+        )]
+        for label, model in models:
+            with self.subTest(model=label), tempfile.TemporaryDirectory() as temp_dir:
+                work_dir = Path(temp_dir)
+                archive_path = work_dir / f"{label}.pt2"
+                expected = model(original.clone())
+                if label == "alias":
+                    self.assertEqual(len(expected), 4)
+                    self.assertEqual(expected[1][0].tolist(), [0, 22, 24, 6])
+                    self.assertTrue(torch.equal(expected[0], original))
+                save_exported_program(model, archive_path, (original.clone(),))
+                result = run_pnnx(work_dir, archive_path)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                spec = importlib.util.spec_from_file_location(label, work_dir / f"{label}_pnnx.py")
+                module = importlib.util.module_from_spec(spec)
+                previous_work_dir = Path.cwd()
+                try:
+                    os.chdir(work_dir)
+                    spec.loader.exec_module(module)
+                    generated = module.Model().eval()
+                    input_value = original.clone()
+                    for _ in range(2):
+                        self.assert_nested_close(expected, generated(input_value))
+                        self.assertTrue(torch.equal(input_value, original))
+                finally:
+                    os.chdir(previous_work_dir)
+
+    def test_reshape_copy_depends_on_unguarded_input_layout(self):
+        # Characterize the input-layout assumption needed by the mutation gate:
+        # export's sample stride does not prove reshape always allocates storage.
+        class ReshapeMutation(torch.nn.Module):
+            def forward(self, x):
+                y = x.transpose(0, 1).reshape(-1)
+                y.add_(1)
+                return y
+
+        original = torch.arange(6).float().reshape(2, 3)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive_path = Path(temp_dir) / "reshape.pt2"
+            save_exported_program(ReshapeMutation(), archive_path, (original.clone(),))
+            loaded = torch.export.load(archive_path).module()
+            contiguous = original.clone()
+            strided = original.t().contiguous().t()
+            self.assertEqual(contiguous.stride(), (3, 1))
+            self.assertEqual(strided.stride(), (1, 2))
+            expected = torch.tensor([1., 4., 2., 5., 3., 6.])
+            self.assert_nested_close(expected, loaded(contiguous))
+            self.assert_nested_close(expected, loaded(strided))
+            self.assertTrue(torch.equal(contiguous, original))
+            self.assertTrue(torch.equal(strided, original + 1))
+            self.assert_conversion_fails(
+                Path(temp_dir), archive_path, "cannot prove mutation is local",
+                "argument self", "torch.ops.aten.add_.Tensor", "reshape", "x",
+            )
+
+    def test_conditional_alias_and_out_mutations_are_rejected(self):
+        class Mutation(torch.nn.Module):
+            def __init__(self, kind):
+                super().__init__()
+                self.kind = kind
+
+            def forward(self, x):
+                if self.kind == "out":
+                    return torch.add(x, 1, out=x)
+                if self.kind == "foreach":
+                    return torch._foreach_add_([x.clone(), x], 1)
+                if self.kind == "reshape":
+                    y = x.reshape(-1)
+                elif self.kind == "flatten":
+                    y = torch.ops.aten.flatten.using_ints(x, 0, -1)
+                elif self.kind == "contiguous_copy":
+                    y = x.transpose(0, 1).contiguous()
+                elif self.kind == "contiguous_same":
+                    y = torch.ops.aten.contiguous.default(x)
+                elif self.kind == "to_same":
+                    y = torch.ops.aten.to.dtype(x, torch.float32)
+                else:
+                    y = x.split(2, dim=1)[0]
+                y.add_(1)
+                return y
+
+        for kind in ("out", "foreach", "reshape", "flatten", "contiguous_copy", "contiguous_same", "to_same", "split"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp_dir:
+                work_dir = Path(temp_dir)
+                archive_path = work_dir / f"{kind}.pt2"
+                save_exported_program(Mutation(kind), archive_path, (torch.arange(12).float().reshape(3, 4),))
+                torch.export.load(archive_path)
+                if kind in ("out", "foreach"):
+                    self.assert_conversion_fails(work_dir, archive_path, "user-input mutation", "argument", "torch.ops.aten.")
+                else:
+                    self.assert_conversion_fails(work_dir, archive_path, "cannot prove mutation is local", "argument self", "x")
+
     def test_tiny_program_and_content_based_routing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             work_dir = Path(temp_dir)
@@ -1439,7 +1622,7 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
             )
 
     def test_disabled_higher_order_wrappers_and_enabled_rejections(self):
-        def inject_wrapper(document, kind, enabled):
+        def inject_wrapper(document, kind, enabled, mutation=None):
             graph = document["graph_module"]["graph"]
             output_name = graph["outputs"][0]["as_tensor"]["name"]
             tensor_meta = graph["tensor_values"]["x"]
@@ -1478,6 +1661,24 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 "is_single_tensor_return": False,
                 "custom_obj_values": {},
             }
+            if mutation:
+                source = "captured" if mutation == "external" else "sub_output"
+                subgraph["nodes"] += [
+                    {
+                        "target": "torch.ops.aten.alias.default",
+                        "inputs": [{"name": "self", "arg": tensor(source), "kind": 1}],
+                        "outputs": [tensor("alias")], "metadata": {},
+                    },
+                    {
+                        "target": "torch.ops.aten.add_.Tensor",
+                        "inputs": [
+                            {"name": "self", "arg": tensor("alias"), "kind": 1},
+                            {"name": "other", "arg": {"as_int": 1}, "kind": 1},
+                        ],
+                        "outputs": [tensor("updated")], "metadata": {},
+                    },
+                ]
+                subgraph["tensor_values"].update(alias=tensor_meta, updated=tensor_meta)
             graph_argument = positional(
                 {"as_graph": {"name": f"{kind}_subgraph", "graph": subgraph}}
             )
@@ -1542,6 +1743,20 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                         negative_path,
                         f"enabled {label} higher-order graph is unsupported",
                     )
+                    for mutation in ("local", "external"):
+                        mutation_path = work_dir / f"{kind}_{mutation}.pt2"
+                        rewrite_model_json(
+                            source_path, mutation_path,
+                            lambda document, kind=kind, mutation=mutation:
+                                inject_wrapper(document, kind, False, mutation),
+                        )
+                        if mutation == "local":
+                            self.assert_conversion_matches(work_dir, mutation_path, (expected[0] + 1,))
+                        else:
+                            self.assert_conversion_fails(
+                                work_dir, mutation_path, "user-input mutation",
+                                "argument self", "torch.ops.aten.add_.Tensor",
+                            )
 
     def test_json_parser_rejects_unsafe_boundaries(self):
         cases = (

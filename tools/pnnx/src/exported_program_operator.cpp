@@ -603,6 +603,7 @@ static int canonicalize_with_schema(const ExportedNode& node,
                                     const c10::FunctionSchema& schema,
                                     bool allow_numbers_as_tensors,
                                     std::vector<CanonicalExportedArgument>& result,
+                                    ExportedOperatorEffects& effects,
                                     std::string& error)
 {
     if (schema.is_vararg())
@@ -664,7 +665,23 @@ static int canonicalize_with_schema(const ExportedNode& node,
         canonical_arguments.push_back(argument);
     }
 
+    ExportedOperatorEffects canonical_effects;
+    canonical_effects.output_alias_input_indices.resize(schema_returns.size());
+    for (size_t j = 0; j < schema_arguments.size(); j++)
+    {
+        const c10::SchemaArgument input(c10::SchemaArgType::input, j);
+        if (schema.is_mutable(input))
+            canonical_effects.mutable_input_indices.push_back(j);
+        for (size_t i = 0; i < schema_returns.size(); i++)
+        {
+            if (schema.may_contain_alias(c10::SchemaArgument(c10::SchemaArgType::output, i), input, true))
+                canonical_effects.output_alias_input_indices[i].push_back(j);
+        }
+    }
+
     result.swap(canonical_arguments);
+    effects.mutable_input_indices.swap(canonical_effects.mutable_input_indices);
+    effects.output_alias_input_indices.swap(canonical_effects.output_alias_input_indices);
     return 0;
 }
 
@@ -713,10 +730,12 @@ int canonicalize_exported_arguments(const ExportedNode& node,
                                     const ExportedProgramHeader& header,
                                     ExportedOperatorTarget& target,
                                     std::vector<CanonicalExportedArgument>& result,
+                                    ExportedOperatorEffects& effects,
                                     std::string& error)
 {
     target = ExportedOperatorTarget();
     result.clear();
+    effects = ExportedOperatorEffects();
     error.clear();
 
     std::string target_error;
@@ -734,14 +753,14 @@ int canonicalize_exported_arguments(const ExportedNode& node,
     try
     {
         if (is_torchvision_deform_conv2d)
-            return canonicalize_with_schema(node, header, torchvision_deform_conv2d_schema(), false, result, error);
+            return canonicalize_with_schema(node, header, torchvision_deform_conv2d_schema(), false, result, effects, error);
 
         if (is_torchvision_roi_align)
-            return canonicalize_with_schema(node, header, torchvision_roi_align_schema(), false, result, error);
+            return canonicalize_with_schema(node, header, torchvision_roi_align_schema(), false, result, effects, error);
 
         const c10::OperatorHandle operator_handle = c10::Dispatcher::singleton().findSchemaOrThrow(target.operator_name.c_str(), target.overload_name.c_str());
         const c10::FunctionSchema& schema = operator_handle.schema();
-        return canonicalize_with_schema(node, header, schema, operator_allows_numbers_as_tensors(target.operator_name), result, error);
+        return canonicalize_with_schema(node, header, schema, operator_allows_numbers_as_tensors(target.operator_name), result, effects, error);
     }
     catch (const c10::Error& e)
     {

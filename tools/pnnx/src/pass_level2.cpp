@@ -1142,9 +1142,9 @@ void pnnx_graph_rewrite(Graph& graph, const GraphRewriterPass* pass, int& opinde
 
 void pass_level2(Graph& g)
 {
-    functionize(g);
-
     eliminate_alias(g);
+
+    functionize(g);
 
     eliminate_contiguous(g);
 

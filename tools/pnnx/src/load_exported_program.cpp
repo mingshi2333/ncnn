@@ -823,6 +823,135 @@ static int validate_tensor_metadata_assertion(const ExportedNode& node,
     return 0;
 }
 
+struct ExportedTensorSources
+{
+    std::set<std::string> definite;
+    std::set<std::string> possible;
+};
+
+static std::vector<std::string> exported_tensor_names(const ExportedArgument& argument)
+{
+    if (argument.type == EXPORTED_ARGUMENT_TENSOR)
+        return std::vector<std::string>(1, argument.name);
+    if (argument.type == EXPORTED_ARGUMENT_TENSOR_LIST)
+        return argument.tensor_names;
+    return std::vector<std::string>();
+}
+
+static bool exported_to_copies(const ExportedOperatorTarget& target,
+                               const std::vector<CanonicalExportedArgument>& arguments,
+                               const ExportedGraph& graph)
+{
+    if (target.operator_name != "aten::to")
+        return false;
+    const ExportedArgument* copy = find_canonical_argument(arguments, "copy");
+    if (copy && copy->type == EXPORTED_ARGUMENT_BOOL && copy->bool_value)
+        return true;
+
+    const ExportedArgument* self = find_canonical_argument(arguments, "self");
+    if (!self || self->type != EXPORTED_ARGUMENT_TENSOR)
+        return false;
+    const std::map<std::string, ExportedTensorMeta>::const_iterator meta = graph.tensor_values.find(self->name);
+    if (meta == graph.tensor_values.end())
+        return false;
+    const ExportedArgument* dtype = find_canonical_argument(arguments, "dtype");
+    if (dtype && dtype->type == EXPORTED_ARGUMENT_SCALAR_TYPE)
+        return dtype->enum_value != meta->second.dtype;
+    return false;
+}
+
+static bool exported_definite_view(const std::string& name)
+{
+    // Conditional copies (reshape/flatten/contiguous/to) deliberately stay May:
+    // serialized example strides are not a runtime input-layout contract.
+    return name == "aten::alias" || name == "aten::detach" || name == "aten::view"
+           || name == "aten::_unsafe_view" || name == "aten::_reshape_alias"
+           || name == "aten::slice" || name == "aten::select" || name == "aten::transpose"
+           || name == "aten::t" || name == "aten::permute" || name == "aten::squeeze"
+           || name == "aten::unsqueeze" || name == "aten::expand" || name == "aten::as_strided"
+           || name == "aten::diagonal" || name == "aten::unfold";
+}
+
+static int propagate_exported_effects(const ExportedNode& node,
+                                      const ExportedOperatorTarget& target,
+                                      const std::vector<CanonicalExportedArgument>& arguments,
+                                      const ExportedOperatorEffects& effects,
+                                      const ExportedProgram& program,
+                                      const ExportedGraph& graph,
+                                      std::map<std::string, ExportedTensorSources>& sources,
+                                      std::string& error)
+{
+    // Resolve every reference before checking effects, including individual list
+    // members. Missing values must never be mistaken for a fresh local tensor.
+    for (size_t j = 0; j < arguments.size(); j++)
+    {
+        const std::vector<std::string> names = exported_tensor_names(arguments[j].value);
+        for (size_t k = 0; k < names.size(); k++)
+        {
+            if (sources.find(names[k]) == sources.end())
+            {
+                error = "unknown tensor value " + names[k] + " for argument " + arguments[j].name + " of " + node.target;
+                return -1;
+            }
+        }
+    }
+    for (size_t i = 0; i < effects.mutable_input_indices.size(); i++)
+    {
+        const CanonicalExportedArgument& argument = arguments[effects.mutable_input_indices[i]];
+        const std::vector<std::string> names = exported_tensor_names(argument.value);
+        for (size_t k = 0; k < names.size(); k++)
+        {
+            const ExportedTensorSources& source = sources.find(names[k])->second;
+            if (!source.definite.empty())
+            {
+                const std::string& origin = *source.definite.begin();
+                for (size_t j = 0; j < program.input_specs.size(); j++)
+                {
+                    const ExportedInputSpec& spec = program.input_specs[j];
+                    if (spec.arg.name != origin)
+                        continue;
+                    const std::string kind = spec.kind == EXPORTED_USER_INPUT ? "user-input" : exported_state_kind_name(spec.kind);
+                    error = "unsupported " + kind + " mutation through argument " + argument.name + " of " + node.target + ": " + origin;
+                    return -1;
+                }
+            }
+            if (!source.possible.empty())
+            {
+                error = "cannot prove mutation is local through " + names[k] + " of " + *source.possible.begin()
+                        + " through argument " + argument.name + " of " + node.target;
+                return -1;
+            }
+        }
+    }
+
+    const bool copies = exported_to_copies(target, arguments, graph);
+    for (size_t i = 0; i < node.outputs.size(); i++)
+    {
+        ExportedTensorSources output;
+        const std::vector<size_t>& aliases = effects.output_alias_input_indices[i];
+        for (size_t j = 0; !copies && j < aliases.size(); j++)
+        {
+            const ExportedArgument& input = arguments[aliases[j]].value;
+            const std::vector<std::string> names = exported_tensor_names(input);
+            // A schema container/wildcard edge gives no member correspondence.
+            // Preserve each input member, merging only into possible origins.
+            const bool definite = input.type == EXPORTED_ARGUMENT_TENSOR && node.outputs[i].type == EXPORTED_ARGUMENT_TENSOR
+                                  && exported_definite_view(target.operator_name);
+            for (size_t k = 0; k < names.size(); k++)
+            {
+                const ExportedTensorSources& source = sources.find(names[k])->second;
+                std::set<std::string>& destination = definite ? output.definite : output.possible;
+                destination.insert(source.definite.begin(), source.definite.end());
+                output.possible.insert(source.possible.begin(), source.possible.end());
+            }
+        }
+        const std::vector<std::string> names = exported_tensor_names(node.outputs[i]);
+        for (size_t j = 0; j < names.size(); j++)
+            sources.insert(std::make_pair(names[j], output));
+    }
+    return 0;
+}
+
 static int lower_exported_program(const ExportedProgram& source_program,
                                   std::map<std::string, MaterializedExportedTensor>& state,
                                   Graph& graph,
@@ -858,6 +987,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
         return -1;
     Graph candidate;
     std::map<std::string, Operand*> values;
+    std::map<std::string, ExportedTensorSources> sources;
     std::set<std::string> operand_names;
     std::set<std::string> operator_names;
     std::map<std::string, size_t> state_uses;
@@ -875,6 +1005,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
     {
         const ExportedInputSpec& spec = source_program.input_specs[i];
         const std::string& name = spec.arg.name;
+        sources[name].definite.insert(name);
         if (values.find(name) != values.end())
         {
             error = "tensor value " + name + " is defined more than once";
@@ -946,7 +1077,10 @@ static int lower_exported_program(const ExportedProgram& source_program,
         const ExportedNode& node = normalized_graph.nodes[i];
         std::vector<CanonicalExportedArgument> arguments;
         ExportedOperatorTarget target;
-        if (canonicalize_exported_arguments(node, source_program.header, target, arguments, error) != 0)
+        ExportedOperatorEffects effects;
+        if (canonicalize_exported_arguments(node, source_program.header, target, arguments, effects, error) != 0)
+            return -1;
+        if (propagate_exported_effects(node, target, arguments, effects, source_program, normalized_graph, sources, error) != 0)
             return -1;
 
         if (target.operator_name == "aten::einsum" && target.overload_name.empty())
