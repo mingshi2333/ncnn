@@ -101,6 +101,53 @@ static int test_attribute_contract()
     return failures;
 }
 
+static int test_attribute_payload_size_mismatch()
+{
+    pnnx::Attribute oversized({}, {3.25f});
+    oversized.data.push_back(0);
+    if (!oversized.get_float32_data().empty())
+    {
+        fprintf(stderr, "oversized attribute payload was presented as valid data\n");
+        return 1;
+    }
+
+    const pnnx::Attribute oversized_initializer({}, {3.25f, 4.5f});
+    if (!oversized_initializer.data.empty() || !oversized_initializer.get_float32_data().empty())
+    {
+        fprintf(stderr, "oversized attribute initializer was partially accepted\n");
+        return 1;
+    }
+
+    pnnx::Attribute truncated({}, {3.25f});
+    truncated.data.resize(2);
+    if (!truncated.get_float32_data().empty())
+    {
+        fprintf(stderr, "truncated attribute payload was presented as valid data\n");
+        return 1;
+    }
+
+    const int metadata_only_types[] = {1, 2, 3};
+    for (int type : metadata_only_types)
+    {
+        pnnx::Attribute metadata_only;
+        metadata_only.type = type;
+        if (!metadata_only.shape.empty() || !metadata_only.data.empty() || !metadata_only.get_float32_data().empty())
+        {
+            fprintf(stderr, "metadata-only type %d scalar attribute was presented as valid data\n", type);
+            return 1;
+        }
+    }
+
+    const pnnx::Attribute empty_initializer({}, {});
+    if (!empty_initializer.data.empty() || !empty_initializer.get_float32_data().empty())
+    {
+        fprintf(stderr, "empty scalar initializer was presented as valid data\n");
+        return 1;
+    }
+
+    return 0;
+}
+
 static int test_attribute_file_roundtrip()
 {
     const char* param_path = "attribute_roundtrip.pnnx.param";
@@ -332,6 +379,7 @@ int main(int argc, char** argv)
 
     int failures = 0;
     failures += test_parameter_roundtrip();
+    failures += test_attribute_payload_size_mismatch();
     failures += test_attribute_contract();
     failures += test_storezip_writer_lifecycle();
     failures += test_attribute_file_roundtrip();

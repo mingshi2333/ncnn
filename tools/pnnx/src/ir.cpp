@@ -169,9 +169,12 @@ Attribute::Attribute(const std::initializer_list<int>& _shape, const std::vector
     type = 1;
     shape = _shape;
 
-    data.resize(elemcount() * type_to_elemsize(type));
-    if (!data.empty())
-        memcpy((void*)data.data(), (const void*)t.data(), data.size());
+    if (t.size() != (size_t)elemcount())
+        return;
+
+    data.resize(t.size() * sizeof(float));
+    if (!t.empty())
+        memcpy((void*)data.data(), (const void*)t.data(), t.size() * sizeof(float));
 }
 
 size_t Attribute::elemsize() const
@@ -195,6 +198,9 @@ int Attribute::elemcount() const
 
 std::vector<float> Attribute::get_float32_data() const
 {
+    if ((type == 1 || type == 2 || type == 3) && data.size() != (size_t)elemcount() * elemsize())
+        return std::vector<float>();
+
     std::vector<float> v(elemcount());
 
     if (type == 1)
