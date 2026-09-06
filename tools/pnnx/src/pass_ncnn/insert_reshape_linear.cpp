@@ -1,16 +1,5 @@
-// Tencent is pleased to support the open source community by making ncnn available.
-//
-// Copyright (C) 2022 THL A29 Limited, a Tencent company. All rights reserved.
-//
-// Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
-//
-// https://opensource.org/licenses/BSD-3-Clause
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
+// Copyright 2022 Tencent
+// SPDX-License-Identifier: BSD-3-Clause
 
 #include "insert_reshape_linear.h"
 #include "pass_ncnn.h"
@@ -55,6 +44,7 @@ void insert_reshape_linear(Graph& graph)
             Operand* linear_out = op->outputs[0];
 
             const int batch_index = linear_in->params["__batch_index"].i;
+            const int ncnn_batch_axis = linear_in->params["__ncnn_batch_axis"].i;
 
             Operator* reshape0 = graph.new_operator_before("Tensor.reshape", op->name + "_ncnnreshape0", op);
             Operator* reshape1 = graph.new_operator_after("Tensor.reshape", op->name + "_ncnnreshape1", op);
@@ -87,16 +77,23 @@ void insert_reshape_linear(Graph& graph)
 
             reshape0_out->params["__batch_index"] = batch_index;
             reshape1_in->params["__batch_index"] = batch_index;
+            reshape0_out->params["__ncnn_batch_axis"] = ncnn_batch_axis;
+            reshape1_in->params["__ncnn_batch_axis"] = ncnn_batch_axis;
 
             int reshape_h = 1;
             for (size_t j = 0; j < linear_in->shape.size() - 1; j++)
             {
+                if (linear_in->shape[j] == -1)
+                {
+                    reshape_h = -1;
+                    break;
+                }
                 reshape_h *= linear_in->shape[j];
             }
 
             std::vector<int> reshape0_out_shape;
             std::vector<int> reshape1_in_shape;
-            if (batch_index == 0 && batch_index != 233)
+            if (ncnn_batch_axis == 0)
             {
                 reshape0_out_shape = {1, reshape_h, linear_in->shape[input_rank - 1]};
                 reshape1_in_shape = {1, reshape_h, linear_out->shape[input_rank - 1]};

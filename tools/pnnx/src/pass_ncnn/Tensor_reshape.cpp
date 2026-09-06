@@ -1,16 +1,5 @@
-// Tencent is pleased to support the open source community by making ncnn available.
-//
-// Copyright (C) 2021 THL A29 Limited, a Tencent company. All rights reserved.
-//
-// Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
-//
-// https://opensource.org/licenses/BSD-3-Clause
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
+// Copyright 2021 Tencent
+// SPDX-License-Identifier: BSD-3-Clause
 
 #include "pass_ncnn.h"
 
@@ -45,24 +34,19 @@ pnnx.Output             output      1 0 out
     {
         const std::vector<int>& shape = captured_params.at("shape").ai;
 
-        const int batch_index = op->outputs[0]->params["__batch_index"].i;
+        const int input_ncnn_batch_axis = op->inputs[0]->params["__ncnn_batch_axis"].i;
+        const int output_ncnn_batch_axis = op->outputs[0]->params["__ncnn_batch_axis"].i;
 
-        if (batch_index != 0 && batch_index != 233)
-        {
-            fprintf(stderr, "reshape tensor with batch index %d is not supported yet!\n", batch_index);
-        }
-
-        // drop shape batch index
         std::vector<int> new_shape;
         for (int i = 0; i < (int)shape.size(); i++)
         {
-            if (i == batch_index && shape[i] == 1)
-                continue;
-
-            new_shape.push_back(shape[i]);
+            int s = shape[i];
+            if (s == -1 && output_ncnn_batch_axis != 233 && !op->outputs[0]->shape.empty() && (int)op->outputs[0]->shape.size() == (int)shape.size())
+                s = op->outputs[0]->shape[i];
+            new_shape.push_back(s);
         }
 
-        if (new_shape.size() == 5 && batch_index == 233)
+        if (new_shape.size() == 5 && output_ncnn_batch_axis == 233)
         {
             if (new_shape[0] == 1)
             {
@@ -71,13 +55,21 @@ pnnx.Output             output      1 0 out
             }
         }
 
-        const int shape_rank = (int)new_shape.size();
-
-        if (shape_rank > 5)
+        if (new_shape.empty())
         {
-            fprintf(stderr, "reshape to %d-rank tensor is not supported yet!\n", shape_rank);
-            return;
+            fprintf(stderr, "reshape to unknown-rank tensor is not supported yet, fallback to flatten\n");
+            new_shape.push_back(-1);
         }
+
+        const bool batch_reshape = input_ncnn_batch_axis != output_ncnn_batch_axis;
+        if (!batch_reshape && output_ncnn_batch_axis != 233 && output_ncnn_batch_axis >= 0 && output_ncnn_batch_axis < (int)new_shape.size())
+        {
+            new_shape.erase(new_shape.begin() + output_ncnn_batch_axis);
+        }
+
+        const int shape_rank = (int)new_shape.size();
+        if (shape_rank > 5 || (shape_rank == 5 && (output_ncnn_batch_axis == 233 || !batch_reshape)))
+            fprintf(stderr, "reshape to %d-rank physical tensor is not supported by ncnn runtime yet\n", shape_rank);
 
         if (shape_rank == 1)
         {
@@ -100,6 +92,22 @@ pnnx.Output             output      1 0 out
             op->params["1"] = new_shape[2];
             op->params["11"] = new_shape[1];
             op->params["2"] = new_shape[0];
+        }
+        if (shape_rank >= 5)
+        {
+            std::string shape_expr = std::to_string(new_shape[shape_rank - 1]);
+            for (int i = shape_rank - 2; i >= 0; i--)
+            {
+                shape_expr += ",";
+                shape_expr += std::to_string(new_shape[i]);
+            }
+            op->params["6"] = shape_expr;
+        }
+
+        if (batch_reshape)
+        {
+            op->params["12"] = input_ncnn_batch_axis;
+            op->params["13"] = output_ncnn_batch_axis;
         }
     }
 };

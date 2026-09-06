@@ -1,20 +1,12 @@
-# Tencent is pleased to support the open source community by making ncnn available.
-#
-# Copyright (C) 2021 THL A29 Limited, a Tencent company. All rights reserved.
-#
-# Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-# in compliance with the License. You may obtain a copy of the License at
-#
-# https://opensource.org/licenses/BSD-3-Clause
-#
-# Unless required by applicable law or agreed to in writing, software distributed
-# under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-# CONDITIONS OF ANY KIND, either express or implied. See the License for the
-# specific language governing permissions and limitations under the License.
+# Copyright 2021 Tencent
+# SPDX-License-Identifier: BSD-3-Clause
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from packaging import version
+
+from pnnx_test_utils import convert_and_import
 
 class Model(nn.Module):
     def __init__(self):
@@ -25,6 +17,9 @@ class Model(nn.Module):
         x = F.interpolate(x, scale_factor=2, mode='nearest')
         x = F.interpolate(x, size=(20), mode='nearest')
         x = F.interpolate(x, scale_factor=(4), mode='nearest')
+        if version.parse(torch.__version__) >= version.parse('1.11'):
+            x = F.interpolate(x, size=12, mode='nearest-exact')
+            x = F.interpolate(x, scale_factor=(3), mode='nearest-exact')
         x = F.interpolate(x, size=16, mode='linear')
         x = F.interpolate(x, scale_factor=2, mode='linear')
         x = F.interpolate(x, size=(24), mode='linear', align_corners=True)
@@ -40,6 +35,9 @@ class Model(nn.Module):
         y = F.interpolate(y, scale_factor=(4,4), mode='nearest')
         y = F.interpolate(y, size=(16,24), mode='nearest')
         y = F.interpolate(y, scale_factor=(2,3), mode='nearest')
+        if version.parse(torch.__version__) >= version.parse('1.11'):
+            y = F.interpolate(y, size=(11,12), mode='nearest-exact')
+            y = F.interpolate(y, scale_factor=(3,2), mode='nearest-exact')
         y = F.interpolate(y, size=16, mode='bilinear')
         y = F.interpolate(y, scale_factor=2, mode='bilinear')
         y = F.interpolate(y, size=(20,20), mode='bilinear', align_corners=False)
@@ -65,6 +63,9 @@ class Model(nn.Module):
         z = F.interpolate(z, scale_factor=(4,4,4), mode='nearest')
         z = F.interpolate(z, size=(16,24,20), mode='nearest')
         z = F.interpolate(z, scale_factor=(2,3,4), mode='nearest')
+        if version.parse(torch.__version__) >= version.parse('1.11'):
+            z = F.interpolate(z, size=(11,12,13), mode='nearest-exact')
+            z = F.interpolate(z, scale_factor=(3,1,2), mode='nearest-exact')
         z = F.interpolate(z, size=16, mode='trilinear')
         z = F.interpolate(z, scale_factor=2, mode='trilinear')
         z = F.interpolate(z, size=(20,20,20), mode='trilinear', align_corners=False)
@@ -91,17 +92,14 @@ def test():
 
     a = net(x, y, z, w)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, y, z, w))
-    mod.save("test_F_interpolate.pt")
+    mod = convert_and_import(
+        net,
+        (x, y, z, w),
+        "test_F_interpolate",
+        pnnx_args=("inputshape=[1,3,32],[1,3,32,32],[1,3,32,32,32],[1,8,86,86]",),
+    )
 
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_F_interpolate.pt inputshape=[1,3,32],[1,3,32,32],[1,3,32,32,32],[1,8,86,86]")
-
-    # pnnx inference
-    import test_F_interpolate_pnnx
-    b = test_F_interpolate_pnnx.test_inference()
+    b = mod.test_inference()
 
     for a0, b0 in zip(a, b):
         if not torch.equal(a0, b0):

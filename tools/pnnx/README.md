@@ -31,12 +31,92 @@ PNNX tries to define a set of operators and a simple and easy-to-use format that
 9. [Model optimization](#pnnx-model-optimization)
 10. [Custom operator support](#pnnx-custom-operator)
 
-# Build TorchScript to PNNX converter
+# Build PNNX converter
 
 1. Install PyTorch and TorchVision c++ library
 2. Build PNNX with cmake
 
 # Usage
+
+## ExportedProgram
+
+1. Export your model with `torch.export` and save the ExportedProgram as PT2
+
+```python
+import torch
+
+model = Model().eval()
+example_inputs = (torch.rand(1, 3, 224, 224),)
+
+exported_program = torch.export.export(model, example_inputs)
+torch.export.save(exported_program, "model.pt2")
+```
+
+2. Convert ExportedProgram to PNNX
+
+```shell
+pnnx model.pt2
+```
+
+The input shapes and model state are read from the PT2 package. Parameters, persistent and non-persistent buffers, and tensor constants become PNNX model attributes instead of runtime inputs. An optional `inputshape` or `input` override must exactly match the static tensor count, shapes and data types stored in the PT2 package. Alternative `inputshape2` and `input2` inputs are unsupported for ExportedProgram.
+
+3. Export the generated PNNX python model as another ExportedProgram
+
+```shell
+python -c 'import model_pnnx; model_pnnx.export_exported_program()'
+```
+
+This exports the inference graph of the generated PNNX Python `Model`, creates `model_pnnx.pt2`, and returns that `torch.export.ExportedProgram` object. It is not a serialization round trip of the original Python module. Pass a tuple to `export_exported_program(example_inputs)` to override the generated example inputs.
+
+### Current ExportedProgram support
+
+- PT2 archive version `0` with one ExportedProgram; consumed ZIP entries must be uncompressed, while unconsumed compressed attachments are ignored and encryption is unsupported for every entry
+- PyTorch 2.13 ExportedProgram schema 8.20 with raw tensor payloads; compatibility paths for the older raw-payload schema minors 8.14, 8.15 and 8.17 are retained but are not part of the continuously tested compatibility contract
+- Inference graphs with protocol-1 positional tensor input PyTrees composed only of tuple/list containers; their leaves are flattened in treespec order at the PNNX model boundary, while tensor output leaves may be reconstructed into protocol-1 tuple/list trees
+- Static tensor shapes, including statically resolved `SymInt`, `SymFloat` and `SymBool` operator arguments
+- Inference-state values, shapes and data types from parameters, persistent and non-persistent buffers, and tensor constants, with raw strided tensor payloads including stride and storage offset; payload layout is used for state materialization, not as a runtime input-stride contract, and the original state category and training identity are not preserved
+- Byte, Char, Short, Int, Long, Half, Float, Double, ComplexHalf, ComplexFloat, ComplexDouble, Bool and BFloat16 state tensors
+- Generated PNNX python helpers preserve imported ExportedProgram state data types instead of converting the model to Float
+- Finite non-tensor Float, Float-list and Complex arguments continue to use PNNX float parameters. When such a value is narrowed in a node with an f64 or c128 tensor input or output, pnnx reports the operator target, argument and before/after values once per distinct warning. This diagnostic makes detected loss visible; it does not guarantee end-to-end double-precision scalar or Expression arithmetic
+- ATen operator targets registered by the linked libtorch dispatcher when their serialized arguments can be represented and the resulting graph can be lowered by the existing PNNX passes
+- `torch.ops.aten.einsum.default` equation syntax and input/output ranks are validated without executing the operator, then whitespace is removed before PNNX parameter serialization; scalar tensor operands are rejected because current PNNX einsum lowering cannot preserve them, and string arguments for other operators are not normalized
+- Disabled `wrap_with_set_grad_enabled` and `wrap_with_autocast` higher-order wrappers with tensor-only captured graphs
+- Operator overloads and defaults are resolved against the linked libtorch dispatcher, and the archive ATen opset must match the linked libtorch opset; the producer version is not independently gated when these serialized contracts are supported
+- The declared operator and model support matrix is tracked by the `test_pt2_*` expectation suite; TorchVision cases are registered when TorchVision is available
+
+### Unsupported ExportedProgram features
+
+- PyTorch 2.8 legacy pickled-payload PT2, incompatible schema majors and schema minors other than 14, 15, 17 and 20
+- AOTInductor-only packages or multiple ExportedPrograms in one PT2 package
+- Dynamic tensor dimensions, range constraints, symbolic expressions or symbolic scalar dataflow, and dynamic model state
+- Keyword inputs, positional input PyTrees containing dict, namedtuple or custom containers, and output PyTrees containing dict, namedtuple or custom containers
+- Training graphs, loss or gradient outputs, and parameter, buffer or user-input mutation outputs. Retained nodes that write directly or through aliases to external state, or whose possible external writes cannot be ruled out, are also rejected even without mutation outputs. Supported local temporary updates remain allowed within the existing slice/select/view functionalization coverage; this is not general view functionalization.
+- Lossless restoration of original module state identity or training semantics. An imported state tensor may be emitted as a generated Python `Parameter` regardless of whether it originated as a parameter, persistent buffer, non-persistent buffer or tensor constant; original `requires_grad`, buffer persistence, `state_dict` keys and parameter/buffer registration are not a round-trip contract
+- End-to-end f64/c128 fidelity for non-tensor scalar parameters and Expressions; high-precision tensor payload and dtype restoration does not widen PNNX scalar parameter storage beyond float
+- Custom objects, tokens, unknown higher-order operators, enabled autocast/set-grad wrappers and control-flow or mutation higher-order operators
+- Non-tensor user input or output leaves, unsupported serialized operator arguments, and graphs which the existing PNNX passes cannot lower
+- Generated native ncnn python inference with Bool, BFloat16, complex or scalar tensor inputs; ExportedProgram conversion and generated PNNX python inference remain supported
+- Compressed PT2 entries consumed by the frontend, any encrypted PT2 entry, and PT2 archive versions other than `0`
+
+Unsupported graph and schema features fail with a feature-specific `load exported program failed:` diagnostic. Archive detection failures use `detect model format failed:`. A package recognized by its PT2 archive marker is not retried as TorchScript.
+
+### ExportedProgram contributor tests
+
+The frontend suite requires Python PyTorch 2.9 or newer. `test_real_producer_omits_default_arguments` checks the current producer layout, while `test_legacy_pickled_payload_layout_is_rejected` checks rejection of a synthetic legacy payload. Producer-dependent tests skip on older producers; the helper self-tests control their producer/exporter environment and remain runnable there. Expected failures require a normal converter exit and a matching category and diagnostic; an unexpected success requires updating the expectation. The unsupported-input helper tests do not require the Python ncnn binding; native ncnn runtime tests still require it.
+
+```shell
+ctest --test-dir build --output-on-failure -L '^pt2_frontend$'
+```
+
+Run the complete PT2 operator and model expectation suite, including the focused bool-attribute ncnn smoke test, with:
+
+```shell
+ctest --test-dir build --output-on-failure -j 8 -L '^pt2_operator$'
+```
+
+CTest assigns these labels when registering tests. Use `-L '^pt2$'` for both groups or `-LE '^pt2$'` for the remaining tests; CI uses the same labels rather than duplicating test-name lists. TorchScript and PT2 cases reuse model definitions and numerical checks but run in separate processes with separate generated-model names. The two input-npy cases retain a shared resource lock for their common input files.
+
+## TorchScript
 
 1. Export your model to TorchScript
 
@@ -498,7 +578,7 @@ TORCH_LIBRARY(upfirdn2d_op, m) {
 |nn.GroupNorm               | :heavy_check_mark: | :heavy_check_mark: |
 |nn.GRU                     | :heavy_check_mark: | :heavy_check_mark: |
 |nn.GRUCell                 |   |
-|nn.Hardshrink              | :heavy_check_mark: |
+|nn.Hardshrink              | :heavy_check_mark: | :heavy_check_mark: |
 |nn.Hardsigmoid             | :heavy_check_mark: | :heavy_check_mark: |
 |nn.Hardswish               | :heavy_check_mark: | :heavy_check_mark: |
 |nn.Hardtanh                | :heavy_check_mark: | :heavy_check_mark: |
@@ -545,6 +625,7 @@ TORCH_LIBRARY(upfirdn2d_op, m) {
 |nn.ReplicationPad1d        | :heavy_check_mark: | :heavy_check_mark: |
 |nn.ReplicationPad2d        | :heavy_check_mark: | :heavy_check_mark: |
 |nn.ReplicationPad3d        | :heavy_check_mark: |
+|nn.RMSNorm                 | :heavy_check_mark: | :heavy_check_mark: |
 |nn.RNN                     | :heavy_check_mark: | :heavy_check_mark:* |
 |nn.RNNBase                 |   |
 |nn.RNNCell                 |   |
@@ -556,7 +637,7 @@ TORCH_LIBRARY(upfirdn2d_op, m) {
 |nn.Softmax2d               | :heavy_check_mark: | :heavy_check_mark: |
 |nn.Softmin                 | :heavy_check_mark: |
 |nn.Softplus                | :heavy_check_mark: |
-|nn.Softshrink              | :heavy_check_mark: |
+|nn.Softshrink              | :heavy_check_mark: | :heavy_check_mark: |
 |nn.Softsign                | :heavy_check_mark: |
 |nn.SyncBatchNorm           |   |
 |nn.Tanh                    | :heavy_check_mark: | :heavy_check_mark: |
@@ -602,7 +683,6 @@ TORCH_LIBRARY(upfirdn2d_op, m) {
 |F.dropout2d                | :heavy_check_mark: | :heavy_check_mark: |
 |F.dropout3d                | :heavy_check_mark: | :heavy_check_mark: |
 |F.elu                      | :heavy_check_mark: | :heavy_check_mark: |
-|F.elu_                     | :heavy_check_mark: | :heavy_check_mark: |
 |F.embedding                | :heavy_check_mark: | :heavy_check_mark: |
 |F.embedding_bag            |  |
 |F.feature_alpha_dropout    | :heavy_check_mark: | :heavy_check_mark: |
@@ -614,16 +694,14 @@ TORCH_LIBRARY(upfirdn2d_op, m) {
 |F.grid_sample              | :heavy_check_mark: | :heavy_check_mark: |
 |F.group_norm               | :heavy_check_mark: | :heavy_check_mark: |
 |F.gumbel_softmax           |  |
-|F.hardshrink               | :heavy_check_mark: |
+|F.hardshrink               | :heavy_check_mark: | :heavy_check_mark: |
 |F.hardsigmoid              | :heavy_check_mark: | :heavy_check_mark: |
 |F.hardswish                | :heavy_check_mark: | :heavy_check_mark: |
 |F.hardtanh                 | :heavy_check_mark: | :heavy_check_mark: |
-|F.hardtanh_                | :heavy_check_mark: | :heavy_check_mark: |
 |F.instance_norm            | :heavy_check_mark: | :heavy_check_mark: |
 |F.interpolate              | :heavy_check_mark: | :heavy_check_mark: |
 |F.layer_norm               | :heavy_check_mark: | :heavy_check_mark: |
 |F.leaky_relu               | :heavy_check_mark: | :heavy_check_mark: |
-|F.leaky_relu_              | :heavy_check_mark: | :heavy_check_mark: |
 |F.linear                   | :heavy_check_mark: | :heavy_check_mark:* |
 |F.local_response_norm      | :heavy_check_mark: | :heavy_check_mark: |
 |F.logsigmoid               | :heavy_check_mark: | :heavy_check_mark: |
@@ -646,10 +724,9 @@ TORCH_LIBRARY(upfirdn2d_op, m) {
 |F.pixel_unshuffle          | :heavy_check_mark: | :heavy_check_mark: |
 |F.prelu                    | :heavy_check_mark: | :heavy_check_mark: |
 |F.relu                     | :heavy_check_mark: | :heavy_check_mark: |
-|F.relu_                    | :heavy_check_mark: | :heavy_check_mark: |
 |F.relu6                    | :heavy_check_mark: | :heavy_check_mark: |
+|F.rms_norm                 | :heavy_check_mark: | :heavy_check_mark: |
 |F.rrelu                    | :heavy_check_mark: |
-|F.rrelu_                   | :heavy_check_mark: |
 |F.scaled_dot_product_attention | :heavy_check_mark: |                |
 |F.selu                     | :heavy_check_mark: | :heavy_check_mark: |
 |F.sigmoid                  | :heavy_check_mark: | :heavy_check_mark: |
@@ -657,13 +734,98 @@ TORCH_LIBRARY(upfirdn2d_op, m) {
 |F.softmax                  | :heavy_check_mark: | :heavy_check_mark: |
 |F.softmin                  | :heavy_check_mark: |
 |F.softplus                 | :heavy_check_mark: |
-|F.softshrink               | :heavy_check_mark: |
+|F.softshrink               | :heavy_check_mark: | :heavy_check_mark: |
 |F.softsign                 | :heavy_check_mark: |
 |F.tanh                     | :heavy_check_mark: | :heavy_check_mark: |
 |F.tanhshrink               | :heavy_check_mark: |
 |F.threshold                | :heavy_check_mark: |
-|F.threshold_               | :heavy_check_mark: |
 |F.unfold                   | :heavy_check_mark: | :heavy_check_mark: |
 |F.upsample                 | :heavy_check_mark: | :heavy_check_mark: |
 |F.upsample_bilinear        | :heavy_check_mark: | :heavy_check_mark: |
 |F.upsample_nearest         | :heavy_check_mark: | :heavy_check_mark: |
+
+# Supported ONNX operator status
+
+| onnx        | Is Supported | Export to ncnn | Note |
+|---------------------------|----|---|---|
+|Abs                        | :heavy_check_mark: | :heavy_check_mark: |
+|Acos                       | :heavy_check_mark: | :heavy_check_mark: |
+|Add                        | :heavy_check_mark: | :heavy_check_mark: |
+|Asin                       | :heavy_check_mark: | :heavy_check_mark: |
+|Atan                       | :heavy_check_mark: | :heavy_check_mark: |
+|AveragePool                | :heavy_check_mark: | :heavy_check_mark: |
+|BatchNormalization         | :heavy_check_mark: | :heavy_check_mark: | only training_mode=0 |
+|Ceil                       | :heavy_check_mark: | :heavy_check_mark: |
+|Celu                       | :heavy_check_mark: | :heavy_check_mark: |
+|Clip                       | :heavy_check_mark: | :heavy_check_mark: |
+|Concat                     | :heavy_check_mark: | :heavy_check_mark: |
+|Constant                   | :heavy_check_mark: | :heavy_check_mark: |
+|Conv                       | :heavy_check_mark: | :heavy_check_mark: |
+|ConvTranspose              | :heavy_check_mark: | :heavy_check_mark: | no auto_pad=SAME |
+|Cos                        | :heavy_check_mark: | :heavy_check_mark: |
+|DepthToSpace               | :heavy_check_mark: | :heavy_check_mark: | only mode='CRD' |
+|Div                        | :heavy_check_mark: | :heavy_check_mark: |
+|Dropout                    | :heavy_check_mark: | :heavy_check_mark: |
+|Elu                        | :heavy_check_mark: | :heavy_check_mark: |
+|Erf                        |  |
+|Exp                        | :heavy_check_mark: | :heavy_check_mark: |
+|Flatten                    | :heavy_check_mark: | :heavy_check_mark: |
+|Floor                      | :heavy_check_mark: | :heavy_check_mark: |
+|GRU                        | :heavy_check_mark: | :heavy_check_mark: | with post squeeze/transpose+reshape |
+|Gelu                       | :heavy_check_mark: | :heavy_check_mark: |
+|Gemm                       | :heavy_check_mark: | :heavy_check_mark: |
+|GlobalAveragePool          | :heavy_check_mark: | :heavy_check_mark: |
+|GlobalMaxPool              | :heavy_check_mark: | :heavy_check_mark: |
+|GroupNormalization         | :heavy_check_mark: | :heavy_check_mark: |
+|HardSigmoid                | :heavy_check_mark: | :heavy_check_mark: |
+|HardSwish                  | :heavy_check_mark: | :heavy_check_mark: |
+|InstanceNormalization      | :heavy_check_mark: | :heavy_check_mark: |
+|LRN                        | :heavy_check_mark: | :heavy_check_mark: |
+|LSTM                       | :heavy_check_mark: | :heavy_check_mark: | with post squeeze/transpose+reshape |
+|LayerNormalization         | :heavy_check_mark: | :heavy_check_mark: |
+|LeakyRelu                  | :heavy_check_mark: | :heavy_check_mark: |
+|Log                        | :heavy_check_mark: | :heavy_check_mark: |
+|LogSoftmax                 | :heavy_check_mark: | :heavy_check_mark: |
+|MatMul                     | :heavy_check_mark: | :heavy_check_mark: |
+|Max                        | :heavy_check_mark: | :heavy_check_mark: |
+|MaxPool                    | :heavy_check_mark: | :heavy_check_mark: |
+|Min                        | :heavy_check_mark: | :heavy_check_mark: |
+|Mish                       | :heavy_check_mark: | :heavy_check_mark: |
+|Mul                        | :heavy_check_mark: | :heavy_check_mark: |
+|Neg                        | :heavy_check_mark: | :heavy_check_mark: |
+|PRelu                      | :heavy_check_mark: | :heavy_check_mark: |
+|Pad                        | :heavy_check_mark: | :heavy_check_mark: |
+|Pow                        | :heavy_check_mark: | :heavy_check_mark: |
+|RNN                        | :heavy_check_mark: | :heavy_check_mark: | with post squeeze/transpose+reshape |
+|Reciprocal                 | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceL1                   | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceL2                   | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceLogSum               | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceLogSumExp            | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceMax                  | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceMean                 | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceMin                  | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceProd                 | :heavy_check_mark: | :heavy_check_mark: | unroll axes |
+|ReduceSum                  | :heavy_check_mark: | :heavy_check_mark: |
+|ReduceSumSquare            | :heavy_check_mark: | :heavy_check_mark: |
+|Relu                       | :heavy_check_mark: | :heavy_check_mark: |
+|Reshape                    | :heavy_check_mark: | :heavy_check_mark: |
+|Resize                     | :heavy_check_mark: | :heavy_check_mark: |
+|RMSNormalization           | :heavy_check_mark: | :heavy_check_mark: |
+|Selu                       | :heavy_check_mark: | :heavy_check_mark: |
+|Shrink                     | :heavy_check_mark: | :heavy_check_mark: | only bias==0/lambda |
+|Sigmoid                    | :heavy_check_mark: | :heavy_check_mark: |
+|Sin                        | :heavy_check_mark: | :heavy_check_mark: |
+|Slice                      | :heavy_check_mark: | :heavy_check_mark: |
+|Softmax                    | :heavy_check_mark: | :heavy_check_mark: |
+|Softplus                   | :heavy_check_mark: | :heavy_check_mark: |
+|Split                      | :heavy_check_mark: | :heavy_check_mark: |
+|Sqrt                       | :heavy_check_mark: | :heavy_check_mark: |
+|Squeeze                    | :heavy_check_mark: | :heavy_check_mark: |
+|Sub                        | :heavy_check_mark: | :heavy_check_mark: |
+|Sum                        | :heavy_check_mark: | :heavy_check_mark: |
+|Tan                        | :heavy_check_mark: | :heavy_check_mark: |
+|Tanh                       | :heavy_check_mark: | :heavy_check_mark: |
+|Transpose                  | :heavy_check_mark: | :heavy_check_mark: |
+|Unsqueeze                  | :heavy_check_mark: | :heavy_check_mark: | unroll axes |
+|Upsample                   |  |
