@@ -3,6 +3,8 @@
 
 #include "exported_program_graph.h"
 
+#include <algorithm>
+#include <cctype>
 #include <map>
 #include <set>
 #include <sstream>
@@ -450,6 +452,247 @@ int normalize_exported_program_graph(const ExportedGraph& graph, ExportedGraph& 
         return -1;
 
     normalized_graph = std::move(candidate);
+    return 0;
+}
+
+struct ExportedEinsumSubscript
+{
+    ExportedEinsumSubscript()
+        : has_ellipsis(false)
+    {
+    }
+
+    std::vector<char> labels;
+    bool has_ellipsis;
+};
+
+static bool is_einsum_label(char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+static bool parse_exported_einsum_subscript(const std::string& value, ExportedEinsumSubscript& subscript, std::string& detail)
+{
+    subscript = ExportedEinsumSubscript();
+
+    for (size_t i = 0; i < value.size();)
+    {
+        if (is_einsum_label(value[i]))
+        {
+            subscript.labels.push_back(value[i]);
+            i++;
+            continue;
+        }
+
+        if (value.compare(i, 3, "...") == 0)
+        {
+            if (subscript.has_ellipsis)
+            {
+                detail = "an einsum subscript may contain at most one ellipsis";
+                return false;
+            }
+
+            subscript.has_ellipsis = true;
+            i += 3;
+            continue;
+        }
+
+        detail = "einsum subscripts may contain only letters and ellipsis";
+        return false;
+    }
+
+    return true;
+}
+
+static bool validate_and_normalize_exported_einsum_equation(const std::string& value, const std::vector<std::vector<int64_t> >& operand_shapes, const std::vector<int64_t>& output_shape,
+        std::string& normalized, std::string& detail)
+{
+    normalized.clear();
+    normalized.reserve(value.size());
+    for (size_t i = 0; i < value.size(); i++)
+    {
+        if (!std::isspace((unsigned char)value[i]))
+            normalized.push_back(value[i]);
+    }
+
+    if (operand_shapes.empty())
+    {
+        detail = "einsum requires at least one operand";
+        return false;
+    }
+
+    for (size_t i = 0; i < operand_shapes.size(); i++)
+    {
+        if (operand_shapes[i].empty())
+        {
+            detail = "scalar einsum operands are unsupported";
+            return false;
+        }
+    }
+
+    const size_t arrow = normalized.find("->");
+    if (arrow != std::string::npos && normalized.find("->", arrow + 2) != std::string::npos)
+    {
+        detail = "einsum equation contains more than one output separator";
+        return false;
+    }
+    if (arrow == std::string::npos && (normalized.find('-') != std::string::npos || normalized.find('>') != std::string::npos))
+    {
+        detail = "einsum equation has an invalid output separator";
+        return false;
+    }
+
+    const std::string input_equation = normalized.substr(0, arrow);
+    std::vector<std::string> input_subscripts;
+    for (size_t begin = 0;;)
+    {
+        const size_t comma = input_equation.find(',', begin);
+        input_subscripts.push_back(input_equation.substr(begin, comma - begin));
+        if (comma == std::string::npos)
+            break;
+        begin = comma + 1;
+    }
+
+    if (input_subscripts.size() != operand_shapes.size())
+    {
+        detail = "einsum subscript count does not match operand count";
+        return false;
+    }
+
+    std::map<char, size_t> label_counts;
+    size_t ellipsis_rank = 0;
+    bool has_input_ellipsis = false;
+    for (size_t i = 0; i < input_subscripts.size(); i++)
+    {
+        ExportedEinsumSubscript subscript;
+        if (!parse_exported_einsum_subscript(input_subscripts[i], subscript, detail))
+            return false;
+
+        if ((!subscript.has_ellipsis && subscript.labels.size() != operand_shapes[i].size())
+                || (subscript.has_ellipsis && subscript.labels.size() > operand_shapes[i].size()))
+        {
+            detail = "einsum subscript rank does not match operand rank";
+            return false;
+        }
+
+        for (size_t j = 0; j < subscript.labels.size(); j++)
+            label_counts[subscript.labels[j]]++;
+
+        if (subscript.has_ellipsis)
+        {
+            has_input_ellipsis = true;
+            ellipsis_rank = std::max(ellipsis_rank, operand_shapes[i].size() - subscript.labels.size());
+        }
+    }
+
+    size_t expected_output_rank = ellipsis_rank;
+    if (arrow == std::string::npos)
+    {
+        for (std::map<char, size_t>::const_iterator it = label_counts.begin(); it != label_counts.end(); ++it)
+        {
+            if (it->second == 1)
+                expected_output_rank++;
+        }
+    }
+    else
+    {
+        ExportedEinsumSubscript output_subscript;
+        if (!parse_exported_einsum_subscript(normalized.substr(arrow + 2), output_subscript, detail))
+            return false;
+        if (output_subscript.has_ellipsis && !has_input_ellipsis)
+        {
+            detail = "einsum output ellipsis is missing from the inputs";
+            return false;
+        }
+
+        std::set<char> output_labels;
+        for (size_t i = 0; i < output_subscript.labels.size(); i++)
+        {
+            const char label = output_subscript.labels[i];
+            if (label_counts.find(label) == label_counts.end())
+            {
+                detail = "einsum output label does not appear in the inputs";
+                return false;
+            }
+            if (!output_labels.insert(label).second)
+            {
+                detail = "einsum output labels must be unique";
+                return false;
+            }
+        }
+
+        expected_output_rank = output_subscript.labels.size();
+        if (output_subscript.has_ellipsis)
+            expected_output_rank += ellipsis_rank;
+    }
+
+    if (expected_output_rank != output_shape.size())
+    {
+        detail = "einsum output rank does not match tensor metadata";
+        return false;
+    }
+
+    return true;
+}
+
+int normalize_exported_operator_arguments(const ExportedNode& node,
+        const ExportedOperatorTarget& target,
+        const ExportedGraph& graph,
+        std::vector<CanonicalExportedArgument>& arguments,
+        std::string& error)
+{
+    if (target.operator_name != "aten::einsum" || !target.overload_name.empty())
+        return 0;
+
+    CanonicalExportedArgument* equation_argument = 0;
+    const CanonicalExportedArgument* tensors_argument = 0;
+    for (size_t j = 0; j < arguments.size(); j++)
+    {
+        if (arguments[j].name == "equation" && arguments[j].value.type == EXPORTED_ARGUMENT_STRING)
+            equation_argument = &arguments[j];
+        if (arguments[j].name == "tensors" && arguments[j].value.type == EXPORTED_ARGUMENT_TENSOR_LIST)
+            tensors_argument = &arguments[j];
+    }
+    if (!equation_argument || !tensors_argument)
+    {
+        error = "cannot lower " + node.target + ": invalid canonical einsum arguments";
+        return -1;
+    }
+
+    std::vector<std::vector<int64_t> > operand_shapes;
+    operand_shapes.reserve(tensors_argument->value.tensor_names.size());
+    for (size_t j = 0; j < tensors_argument->value.tensor_names.size(); j++)
+    {
+        const std::string& tensor_name = tensors_argument->value.tensor_names[j];
+        const std::map<std::string, ExportedTensorMeta>::const_iterator meta_it = graph.tensor_values.find(tensor_name);
+        if (meta_it == graph.tensor_values.end())
+        {
+            error = "missing tensor metadata for einsum operand " + tensor_name;
+            return -1;
+        }
+        operand_shapes.push_back(meta_it->second.sizes);
+    }
+
+    if (node.outputs.size() != 1 || node.outputs[0].type != EXPORTED_ARGUMENT_TENSOR)
+    {
+        error = "cannot lower " + node.target + ": invalid einsum output";
+        return -1;
+    }
+    const std::map<std::string, ExportedTensorMeta>::const_iterator output_meta_it = graph.tensor_values.find(node.outputs[0].name);
+    if (output_meta_it == graph.tensor_values.end())
+    {
+        error = "missing tensor metadata for einsum output " + node.outputs[0].name;
+        return -1;
+    }
+
+    std::string normalized_equation;
+    std::string detail;
+    if (!validate_and_normalize_exported_einsum_equation(equation_argument->value.string_value, operand_shapes, output_meta_it->second.sizes, normalized_equation, detail))
+    {
+        error = "cannot lower non-tensor argument equation for " + node.target + ": " + detail;
+        return -1;
+    }
+    equation_argument->value.string_value.swap(normalized_equation);
     return 0;
 }
 

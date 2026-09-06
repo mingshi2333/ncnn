@@ -177,6 +177,10 @@ def convert_and_import(
     command = [pnnx_executable, str(archive_path)] + list(pnnx_args)
     completed = subprocess.run(command, capture_output=True, text=True)
     diagnostic = completed.stdout + completed.stderr
+    # Never classify a POSIX signal or Windows exception as expected failure.
+    # Windows also uses 0xffffffff for pnnx's ordinary return -1.
+    if completed.returncode < 0 or 0x80000000 <= completed.returncode < 0xffffffff:
+        raise RuntimeError("pnnx terminated abnormally with exit code %d\n%s" % (completed.returncode, diagnostic))
     if completed.returncode != 0:
         if export_format == ExportTestFormat.EXPORTED_PROGRAM:
             category = PNNX_LOWERING_UNSUPPORTED

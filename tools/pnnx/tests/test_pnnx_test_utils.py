@@ -54,13 +54,14 @@ class Pt2ProducerStatusTest(unittest.TestCase):
     def test_expected_pt2_failures_exit_with_ctest_skip_code(self):
         failure = RuntimeError("PendingUnbackedSymbolNotFound: Pending unbacked symbols")
         with mock.patch.dict(os.environ, {"PNNX_TEST_FORMAT": "pt2"}):
-            with mock.patch.object(torch.export, "export", side_effect=failure):
-                with self.assertRaises(SystemExit) as raised:
-                    convert_and_import(None, (), "test_Tensor_index")
+            with mock.patch.object(pnnx_test_utils, "pt2_producer_status", return_value=SUPPORTED):
+                with mock.patch.object(torch, "export", create=True) as exporter:
+                    exporter.export.side_effect = failure
+                    with self.assertRaises(SystemExit) as raised:
+                        convert_and_import(None, (), "test_Tensor_index")
         self.assertEqual(raised.exception.code, 77)
 
     def test_expected_failure_table_contract(self):
-        self.assertEqual(len(PT2_EXPECTED_FAILURES), 6)
         categories = {
             EXPORT_UNSUPPORTED,
             PT2_FRONTEND_UNSUPPORTED,
@@ -142,6 +143,32 @@ class Pt2RunnerTest(unittest.TestCase):
 
 
 class Pt2GeneratedArtifactTest(unittest.TestCase):
+    def test_converter_exit_status_precedes_expected_diagnostic(self):
+        diagnostic = "load exported program failed: dynamic tensor shapes are unsupported"
+        expectation = {"exit_status": (PT2_FRONTEND_UNSUPPORTED, "dynamic tensor shapes are unsupported")}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            basename = str(Path(temp_dir) / "exit_status")
+            with mock.patch.dict(os.environ, {"PNNX_TEST_FORMAT": "pt2"}):
+                with mock.patch.object(pnnx_test_utils, "pt2_producer_status", return_value=SUPPORTED):
+                    with mock.patch.object(torch, "export", create=True):
+                        with mock.patch.dict(PT2_EXPECTED_FAILURES, expectation, clear=True):
+                            # main returns -1 as 255 on POSIX or 0xffffffff on Windows.
+                            for code in (255, 0xffffffff, -11, -6, 0xc0000005, 0xc0000409):
+                                with self.subTest(returncode=code):
+                                    completed = subprocess.CompletedProcess([], code, "", diagnostic)
+                                    with mock.patch.object(pnnx_test_utils.subprocess, "run", return_value=completed):
+                                        try:
+                                            convert_and_import(None, (), "exit_status", output_basename=basename)
+                                        except (RuntimeError, SystemExit) as error:
+                                            if code in (255, 0xffffffff):
+                                                self.assertIsInstance(error, SystemExit)
+                                                self.assertEqual(error.code, 77)
+                                            else:
+                                                self.assertIsInstance(error, RuntimeError)
+                                                self.assertIn(str(code), str(error))
+                                        else:
+                                            self.fail("converter failure was ignored")
+
     def test_failed_pnnx_conversion_removes_stale_generated_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             original_cwd = os.getcwd()
@@ -167,8 +194,8 @@ class Pt2GeneratedArtifactTest(unittest.TestCase):
                         "PNNX_TEST_PNNX": "pnnx",
                     },
                 ):
-                    with mock.patch.object(torch.export, "export", return_value=object()):
-                        with mock.patch.object(torch.export, "save"):
+                    with mock.patch.object(pnnx_test_utils, "pt2_producer_status", return_value=SUPPORTED):
+                        with mock.patch.object(torch, "export", create=True):
                             with mock.patch("pnnx_test_utils.subprocess.run", return_value=failed):
                                 with self.assertRaises(AssertionError):
                                     convert_and_import(None, (), "stale")

@@ -78,7 +78,7 @@ jobs:
         MKL_NUM_THREADS: 1
       run: |
         cd tools/pnnx/build
-        ctest -C Release --output-on-failure -R "^(test_exported_program.*|test_pnnx_test_utils)$"
+        ctest -C Release --output-on-failure -L '^pt2_frontend$'
 
   build:
     runs-on: [self-hosted, linux, ubuntu25]
@@ -380,7 +380,7 @@ jobs:
         export MKL_NUM_THREADS=1
         export MKL_ENABLE_INSTRUCTIONS=SSE4_2
         cd tools/pnnx/build
-        ctest --output-on-failure -j 8 -E "^(test_pt2_.*|test_exported_program.*|test_pnnx_test_utils)$"
+        ctest --output-on-failure -j 8 -LE '^pt2$'
 
     - name: exported-program-test
       if: matrix.torch == '2.12.1'
@@ -392,7 +392,7 @@ jobs:
         export MKL_ENABLE_INSTRUCTIONS=SSE4_2
         cd tools/pnnx/build
         cmake --build . -j 8 --target pnnx_test_exported_program_parameter_roundtrip
-        ctest --output-on-failure -j 8 -R "^(test_pt2_.*|test_exported_program.*|test_pnnx_test_utils)$"
+        ctest --output-on-failure -j 8 -L '^pt2$'
 
     - name: python-pnnx
       run: |

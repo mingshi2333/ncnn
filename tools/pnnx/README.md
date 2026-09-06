@@ -102,17 +102,19 @@ Unsupported graph and schema features fail with a feature-specific `load exporte
 
 ### ExportedProgram contributor tests
 
-The frontend suite requires Python PyTorch 2.9 or newer. `test_real_producer_omits_default_arguments` checks the current producer layout, while `test_legacy_pickled_payload_layout_is_rejected` checks rejection of a synthetic legacy payload. The helper suite keeps six expected-failure contracts strict. CTest skips these tests on older producers. The unsupported-input helper tests do not require the Python ncnn binding; native ncnn runtime tests still require it.
+The frontend suite requires Python PyTorch 2.9 or newer. `test_real_producer_omits_default_arguments` checks the current producer layout, while `test_legacy_pickled_payload_layout_is_rejected` checks rejection of a synthetic legacy payload. Producer-dependent tests skip on older producers; the helper self-tests control their producer/exporter environment and remain runnable there. Expected failures require a normal converter exit and a matching category and diagnostic; an unexpected success requires updating the expectation. The unsupported-input helper tests do not require the Python ncnn binding; native ncnn runtime tests still require it.
 
 ```shell
-ctest --test-dir build --output-on-failure -R '^(test_exported_program.*|test_pnnx_test_utils)$'
+ctest --test-dir build --output-on-failure -L '^pt2_frontend$'
 ```
 
-Run all PT2-named tests, including the complete operator and model expectation suite and the focused bool-attribute ncnn smoke test, with:
+Run the complete PT2 operator and model expectation suite, including the focused bool-attribute ncnn smoke test, with:
 
 ```shell
-ctest --test-dir build --output-on-failure -j 8 -R '^test_pt2_'
+ctest --test-dir build --output-on-failure -j 8 -L '^pt2_operator$'
 ```
+
+CTest assigns these labels when registering tests. Use `-L '^pt2$'` for both groups or `-LE '^pt2$'` for the remaining tests; CI uses the same labels rather than duplicating test-name lists. TorchScript and PT2 cases reuse model definitions and numerical checks but run in separate processes with separate generated-model names. The two input-npy cases retain a shared resource lock for their common input files.
 
 ## TorchScript
 

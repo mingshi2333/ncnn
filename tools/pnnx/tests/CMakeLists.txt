@@ -36,9 +36,13 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_pnnx_test_utils.py
 )
 
+set_tests_properties(test_exported_program_parameter_roundtrip test_exported_program test_exported_program_roundtrip test_pnnx_test_utils PROPERTIES
+    LABELS "pt2;pt2_frontend"
+)
+
 macro(pnnx_add_pt2_test name)
     add_test(NAME test_pt2_${name} COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_pt2_test.py --pnnx $<TARGET_FILE:pnnx> --build-dir ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py)
-    set_tests_properties(test_pt2_${name} PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(test_pt2_${name} PROPERTIES SKIP_RETURN_CODE 77 LABELS "pt2;pt2_operator")
 endmacro()
 
 macro(pnnx_add_test name)
