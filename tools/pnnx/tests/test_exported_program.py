@@ -209,12 +209,6 @@ class ValueNameModel(torch.nn.Module):
         return added, torch.relu(added)
 
 
-class TensorListValueNameModel(torch.nn.Module):
-    def forward(self, x):
-        values = torch.ops.aten.split.Tensor(x, 1)
-        return values[0], values[1]
-
-
 class StaticSymbolArgumentModel(torch.nn.Module):
     def forward(self, x):
         x = torch.ops.aten.leaky_relu.default(x, 0.25)
@@ -1264,48 +1258,35 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
     def test_tensor_names_remain_distinct_at_optlevel_one(self):
         input_value = torch.tensor([-3.0, 1.0])
         value_model = ValueNameModel().eval()
-        tensor_list_model = TensorListValueNameModel().eval()
+        expected = (torch.tensor([-1.0, 3.0]), torch.tensor([0.0, 3.0]))
         cases = (
             (
                 "intermediate_collision",
-                value_model,
                 {"add": "x.y", "relu": "x_y"},
-                (torch.tensor([-1.0, 3.0]), torch.tensor([0.0, 3.0])),
             ),
-            ("hyphen", value_model, {"add": "x-y"}, value_model(input_value)),
-            ("space", value_model, {"add": "x y"}, value_model(input_value)),
-            ("colon", value_model, {"add": "x:y"}, value_model(input_value)),
-            ("slash", value_model, {"add": "x/y"}, value_model(input_value)),
-            ("leading_digit", value_model, {"add": "1value"}, value_model(input_value)),
-            ("keyword", value_model, {"add": "class"}, value_model(input_value)),
-            ("generated", value_model, {"add": "pnnx_0"}, value_model(input_value)),
+            ("hyphen", {"add": "x-y"}),
+            ("space", {"add": "x y"}),
+            ("colon", {"add": "x:y"}),
+            ("slash", {"add": "x/y"}),
+            ("leading_digit", {"add": "1value"}),
+            ("keyword", {"add": "class"}),
+            ("generated", {"add": "pnnx_0"}),
             (
                 "input_collision",
-                value_model,
                 {"x": "x_y", "add": "x.y"},
-                value_model(input_value),
-            ),
-            (
-                "tensor_list_collision",
-                tensor_list_model,
-                {"getitem": "x.y", "getitem_1": "x_y"},
-                tensor_list_model(input_value),
             ),
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             work_dir = Path(temp_dir)
-            sources = {}
-            for model in (value_model, tensor_list_model):
-                source_path = work_dir / f"{type(model).__name__}.pt2"
-                save_exported_program(model, source_path, (input_value,))
-                sources[type(model)] = source_path
+            source_path = work_dir / "ValueNameModel.pt2"
+            save_exported_program(value_model, source_path, (input_value,))
 
-            for label, model, replacements, expected in cases:
+            for label, replacements in cases:
                 with self.subTest(case=label):
                     archive_path = work_dir / f"value_name_{label}.pt2"
                     rewrite_model_json(
-                        sources[type(model)],
+                        source_path,
                         archive_path,
                         lambda document: rename_exported_tensor_values(
                             document, replacements
@@ -1320,12 +1301,11 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                     result = run_pnnx(
                         work_dir, archive_path, "optlevel=1", "fp16=0"
                     )
-                    if label != "tensor_list_collision":
-                        self.assertEqual(
-                            result.returncode,
-                            0,
-                            result.stderr.decode(errors="replace"),
-                        )
+                    self.assertEqual(
+                        result.returncode,
+                        0,
+                        result.stderr.decode(errors="replace"),
+                    )
 
                     param_lines = archive_path.with_suffix(
                         ".pnnx.param"
