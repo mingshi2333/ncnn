@@ -382,9 +382,9 @@ static void report_exported_float_narrowing(const ExportedNode& node, const std:
 }
 
 static void report_exported_scalar_narrowing(const ExportedNode& node,
-                                             const std::vector<CanonicalExportedArgument>& arguments,
-                                             const ExportedGraph& graph,
-                                             std::set<std::string>& warnings)
+        const std::vector<CanonicalExportedArgument>& arguments,
+        const ExportedGraph& graph,
+        std::set<std::string>& warnings)
 {
     bool has_high_precision_tensor = false;
     for (size_t i = 0; i < arguments.size() && !has_high_precision_tensor; i++)
