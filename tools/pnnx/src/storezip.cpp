@@ -983,6 +983,7 @@ int StoreZipWriter::close()
 
     fclose(fp);
     fp = 0;
+    filemetas.clear();
 
     return 0;
 }

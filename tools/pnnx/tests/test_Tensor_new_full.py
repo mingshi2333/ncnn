@@ -38,6 +38,9 @@ def test():
 
     b = mod.test_inference()
 
+    if len(a) != len(b):
+        return False
+
     for a0, b0 in zip(a, b):
         if a0.shape != b0.shape or a0.dtype != b0.dtype or not torch.equal(a0, b0):
             return False

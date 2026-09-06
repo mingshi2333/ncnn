@@ -14,10 +14,14 @@ add_test(
     NAME test_exported_program_parameter_roundtrip
     COMMAND $<TARGET_FILE:pnnx_test_exported_program_parameter_roundtrip>
 )
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test_exported_program_parameter_roundtrip")
+set_tests_properties(test_exported_program_parameter_roundtrip PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test_exported_program_parameter_roundtrip"
+)
 
 add_test(
     NAME test_exported_program
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program.py $<TARGET_FILE:pnnx>
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program.py $<TARGET_FILE:pnnx> --ir-roundtrip-executable $<TARGET_FILE:pnnx_test_exported_program_parameter_roundtrip>
 )
 
 add_test(

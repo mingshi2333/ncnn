@@ -3,6 +3,7 @@
 # Copyright 2026 Tencent
 # SPDX-License-Identifier: BSD-3-Clause
 
+import argparse
 import importlib.util
 import io
 import json
@@ -23,7 +24,11 @@ import torch
 
 
 PNNX = Path(sys.argv[1]).resolve()
-sys.argv = [sys.argv[0]] + sys.argv[2:]
+argument_parser = argparse.ArgumentParser(add_help=False)
+argument_parser.add_argument("--ir-roundtrip-executable", type=Path)
+test_arguments, unittest_arguments = argument_parser.parse_known_args(sys.argv[2:])
+IR_ROUNDTRIP_EXECUTABLE = test_arguments.ir_roundtrip_executable
+sys.argv = [sys.argv[0]] + unittest_arguments
 TORCH_VERSION = tuple(
     int(component) for component in torch.__version__.split("+", 1)[0].split(".")[:2]
 )
@@ -67,6 +72,20 @@ class BoolInputModel(torch.nn.Module):
 class ScalarInputModel(torch.nn.Module):
     def forward(self, x):
         return x + 1
+
+
+class ScalarStateModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("f32", torch.tensor(3.25, dtype=torch.float32))
+        self.register_buffer("f64", torch.tensor(-6.5, dtype=torch.float64))
+        self.register_buffer(
+            "i64", torch.tensor(1234567890123456789, dtype=torch.int64)
+        )
+        self.register_buffer("flag", torch.tensor(True, dtype=torch.bool))
+
+    def forward(self, x):
+        return x, self.f32, self.f64, self.i64, self.flag
 
 
 class OperatorReturnsModel(torch.nn.Module):
@@ -783,6 +802,36 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
             torch.manual_seed(0)
             self.assert_nested_close(
                 model(torch.rand(())), load_generated_output(work_dir, archive_path.stem)
+            )
+
+    def test_scalar_state_pnnx_ir_roundtrip(self):
+        if IR_ROUNDTRIP_EXECUTABLE is None:
+            self.skipTest(
+                "--ir-roundtrip-executable is required for the cross-C++ IR check"
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+            archive_path = work_dir / "scalar_state.pt2"
+            model = ScalarStateModel().eval()
+            input_value = torch.tensor([1.0, -2.0])
+            save_exported_program(model, archive_path, (input_value,))
+            torch.manual_seed(0)
+            expected = model(torch.rand(input_value.shape))
+            self.assert_conversion_matches(work_dir, archive_path, expected)
+
+            result = subprocess.run(
+                [
+                    str(IR_ROUNDTRIP_EXECUTABLE.resolve()),
+                    str(archive_path.with_suffix(".pnnx.param")),
+                    str(archive_path.with_suffix(".pnnx.bin")),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(
+                result.returncode, 0, result.stderr.decode(errors="replace")
             )
 
     def test_operator_returns_are_validated(self):

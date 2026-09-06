@@ -169,11 +169,9 @@ Attribute::Attribute(const std::initializer_list<int>& _shape, const std::vector
     type = 1;
     shape = _shape;
 
-    if (shape.size() > 0)
-    {
-        data.resize(elemcount() * type_to_elemsize(type));
+    data.resize(elemcount() * type_to_elemsize(type));
+    if (!data.empty())
         memcpy((void*)data.data(), (const void*)t.data(), data.size());
-    }
 }
 
 size_t Attribute::elemsize() const
@@ -183,11 +181,11 @@ size_t Attribute::elemsize() const
 
 int Attribute::elemcount() const
 {
-    if (shape.empty())
+    if (type == 0)
         return 0;
 
-    int size = shape[0];
-    for (size_t i = 1; i < shape.size(); i++)
+    int size = 1;
+    for (size_t i = 0; i < shape.size(); i++)
     {
         size *= shape[i];
     }
@@ -201,7 +199,7 @@ std::vector<float> Attribute::get_float32_data() const
 
     if (type == 1)
     {
-        memcpy((void*)v.data(), (const void*)data.data(), data.size());
+        memcpy((void*)v.data(), (const void*)data.data(), v.size() * sizeof(float));
     }
     else if (type == 2)
     {
@@ -620,7 +618,7 @@ static void load_shape(Operator* op, const std::string& key, const std::string& 
     std::istringstream lcss(lc);
 
     operand->shape.clear();
-    while (!lcss.eof())
+    while (!lc.empty() && !lcss.eof())
     {
         std::string elem;
         std::getline(lcss, elem, ',');
@@ -661,7 +659,7 @@ static void load_attribute(Operator* op, const std::string& key, const std::stri
     std::istringstream lcss(lc);
 
     a.shape.clear();
-    while (!lcss.eof())
+    while (!lc.empty() && !lcss.eof())
     {
         std::string elem;
         std::getline(lcss, elem, ',');
@@ -669,9 +667,6 @@ static void load_attribute(Operator* op, const std::string& key, const std::stri
         int i = std::stoi(elem);
         a.shape.push_back(i);
     }
-
-    if (a.shape.empty())
-        return;
 
     // data
     size_t size = 1;
@@ -2989,7 +2984,7 @@ int Graph::parse(const std::string& param)
                     std::istringstream lcss(lc);
 
                     attr.shape.clear();
-                    while (!lcss.eof())
+                    while (!lc.empty() && !lcss.eof())
                     {
                         std::string elem;
                         std::getline(lcss, elem, ',');
