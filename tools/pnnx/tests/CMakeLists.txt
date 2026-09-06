@@ -390,6 +390,9 @@ pnnx_add_test(pnnx_eliminate_noop_upsample)
 pnnx_add_test(pnnx_expression)
 pnnx_add_test(pnnx_fold_constant)
 pnnx_add_test(pnnx_input_npy)
+set_tests_properties(test_pnnx_input_npy test_pt2_pnnx_input_npy PROPERTIES
+    RESOURCE_LOCK pnnx_input_npy_fixtures
+)
 pnnx_add_test(pnnx_fuse_channel_shuffle)
 pnnx_add_test(pnnx_fuse_conv1d_batchnorm1d)
 pnnx_add_test(pnnx_fuse_conv2d_batchnorm2d)

@@ -607,6 +607,91 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 finally:
                     os.chdir(previous_work_dir)
 
+    def test_local_view_updates_rebuild_all_affected_inputs(self):
+        class LocalViews(torch.nn.Module):
+            def __init__(self, order):
+                super().__init__()
+                self.order = order
+
+            def forward(self, x):
+                y = x.clone()
+                a = y.view(3, 4)
+                before = a.clone()
+                if self.order == "two_views":
+                    b = y.view(2, 6).view(3, 4)
+                a[:, 1:3].add_(10)
+                if self.order == "root_view":
+                    return before, y + a, a, y
+                if self.order == "view_root":
+                    return before, a + y, a, y
+                return before, a + b, a, b, y
+
+        original = torch.arange(12).float().reshape(3, 4)
+        updated = original + torch.tensor([0., 10., 10., 0.])
+        for order in ("root_view", "view_root", "two_views"):
+            for model_format in ("pt2", "torchscript"):
+                with self.subTest(order=order, format=model_format), tempfile.TemporaryDirectory() as temp_dir:
+                    work_dir = Path(temp_dir)
+                    model_path = work_dir / f"local_views.{model_format}"
+                    model = LocalViews(order).eval()
+                    expected = (original, updated * 2, updated, updated)
+                    if order == "two_views":
+                        expected += (updated,)
+                    self.assert_nested_close(expected, model(original.clone()))
+                    if model_format == "pt2":
+                        save_exported_program(model, model_path, (original.clone(),))
+                        self.assert_nested_close(expected, torch.export.load(model_path).module()(original.clone()))
+                    else:
+                        torch.jit.trace(model, (original.clone(),)).save(str(model_path))
+                    result = run_pnnx(work_dir, model_path, "inputshape=[3,4]")
+                    self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                    spec = importlib.util.spec_from_file_location("local_views", work_dir / "local_views_pnnx.py")
+                    module = importlib.util.module_from_spec(spec)
+                    previous_work_dir = Path.cwd()
+                    try:
+                        os.chdir(work_dir)
+                        spec.loader.exec_module(module)
+                        generated = module.Model().eval()
+                        input_value = original.clone()
+                        for _ in range(2):
+                            self.assert_nested_close(expected, generated(input_value))
+                            self.assertTrue(torch.equal(input_value, original))
+                    finally:
+                        os.chdir(previous_work_dir)
+
+    def test_external_fill_mutations_are_rejected(self):
+        class ExternalFill(torch.nn.Module):
+            def __init__(self, view, tensor_value):
+                super().__init__()
+                self.view = view
+                self.tensor_value = tensor_value
+
+            def forward(self, x, value):
+                target = x.view(3, 4)[:, 1:3] if self.view else x
+                target.fill_(value if self.tensor_value else 7.)
+                return x.clone()
+
+        original = torch.arange(12).float().reshape(3, 4)
+        for view in (False, True):
+            for tensor_value in (False, True):
+                with self.subTest(view=view, tensor_value=tensor_value), tempfile.TemporaryDirectory() as temp_dir:
+                    work_dir = Path(temp_dir)
+                    archive_path = work_dir / "external_fill.pt2"
+                    model = ExternalFill(view, tensor_value).eval()
+                    value = torch.tensor(7.)
+                    expected = original.clone()
+                    if view:
+                        expected[:, 1:3] = 7.
+                    else:
+                        expected[:] = 7.
+                    save_exported_program(model, archive_path, (original.clone(), value))
+                    self.assert_nested_close(expected, torch.export.load(archive_path).module()(original.clone(), value))
+                    overload = "Tensor" if tensor_value else "Scalar"
+                    self.assert_conversion_fails(
+                        work_dir, archive_path, "user-input mutation", "argument self",
+                        f"torch.ops.aten.fill_.{overload}", "x",
+                    )
+
     def test_reshape_copy_depends_on_unguarded_input_layout(self):
         # Characterize the input-layout assumption needed by the mutation gate:
         # export's sample stride does not prove reshape always allocates storage.
@@ -1143,6 +1228,18 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
             def forward(self, x):
                 return x + 0.1
 
+        class FloatListModel(torch.nn.Module):
+            def forward(self, x):
+                left = torch.nn.functional.interpolate(x, scale_factor=(1.1, 1.2), mode="nearest")
+                right = torch.nn.functional.interpolate(x, scale_factor=(1.1, 1.2), mode="nearest")
+                return left, right
+
+        class ComplexScalarModel(torch.nn.Module):
+            def forward(self, x):
+                left = torch.ops.aten.add.Scalar(x, complex(16777217., 16777219.))
+                right = torch.ops.aten.add.Scalar(x, complex(16777217., 16777219.))
+                return left, right
+
         warning = "warning: lossy scalar narrowing"
         cases = (
             (
@@ -1150,11 +1247,25 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 HighPrecisionModel(),
                 torch.zeros(2, dtype=torch.float64),
                 (
-                    warning,
-                    "torch.ops.aten.add.Tensor",
-                    "argument other",
-                    "16777217",
-                    "16777216",
+                    "torch.ops.aten.add.Tensor argument other: 16777217 -> 16777216",
+                ),
+            ),
+            (
+                "lossy_float_list",
+                FloatListModel(),
+                torch.zeros(1, 1, 2, 2, dtype=torch.float64),
+                (
+                    "torch.ops.aten.upsample_nearest2d.vec argument scale_factors[0]: 1.1000000000000001 -> 1.10000002",
+                    "torch.ops.aten.upsample_nearest2d.vec argument scale_factors[1]: 1.2 -> 1.20000005",
+                ),
+            ),
+            (
+                "lossy_complex",
+                ComplexScalarModel(),
+                torch.zeros(2, dtype=torch.complex128),
+                (
+                    "torch.ops.aten.add.Scalar argument other.real: 16777217 -> 16777216",
+                    "torch.ops.aten.add.Scalar argument other.imag: 16777219 -> 16777220",
                 ),
             ),
             (
@@ -1182,8 +1293,8 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, stderr)
                     if messages:
                         for message in messages:
-                            self.assertIn(message, stderr)
-                        self.assertEqual(stderr.count(warning), 1)
+                            self.assertIn(f"{warning} for {message} in f64/c128 tensor context", stderr)
+                        self.assertEqual(stderr.count(warning), len(messages))
                     else:
                         self.assertNotIn(warning, stderr)
 

@@ -12,6 +12,8 @@ class Model(nn.Module):
         super(Model, self).__init__()
 
     def forward(self, x, y, z):
+        x = x.clone()
+        y = y.clone()
         x[:2,:].fill_(z[0])
         y[:1,:].fill_(0.22)
         return x + y.fill_(7)

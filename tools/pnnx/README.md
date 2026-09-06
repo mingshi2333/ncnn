@@ -90,7 +90,7 @@ This exports the inference graph of the generated PNNX Python `Model`, creates `
 - AOTInductor-only packages or multiple ExportedPrograms in one PT2 package
 - Dynamic tensor dimensions, range constraints, symbolic expressions or symbolic scalar dataflow, and dynamic model state
 - Keyword inputs, positional input PyTrees containing dict, namedtuple or custom containers, and output PyTrees containing dict, namedtuple or custom containers
-- Training graphs, loss or gradient outputs, and parameter, buffer or user-input mutation outputs
+- Training graphs, loss or gradient outputs, and parameter, buffer or user-input mutation outputs. Retained nodes that write directly or through aliases to external state, or whose possible external writes cannot be ruled out, are also rejected even without mutation outputs. Supported local temporary updates remain allowed within the existing slice/select/view functionalization coverage; this is not general view functionalization.
 - Lossless restoration of original module state identity or training semantics. An imported state tensor may be emitted as a generated Python `Parameter` regardless of whether it originated as a parameter, persistent buffer, non-persistent buffer or tensor constant; original `requires_grad`, buffer persistence, `state_dict` keys and parameter/buffer registration are not a round-trip contract
 - End-to-end f64/c128 fidelity for non-tensor scalar parameters and Expressions; high-precision tensor payload and dtype restoration does not widen PNNX scalar parameter storage beyond float
 - Custom objects, tokens, unknown higher-order operators, enabled autocast/set-grad wrappers and control-flow or mutation higher-order operators
