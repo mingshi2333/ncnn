@@ -10,12 +10,14 @@
 #include "pt2_archive.h"
 
 #include <limits.h>
+#include <stdio.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <complex>
 #include <exception>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <new>
@@ -335,6 +337,85 @@ static int exported_float_to_pnnx(double value, float& converted)
         return -1;
 
     return 0;
+}
+
+static bool exported_tensor_uses_high_precision_float(const std::string& name, const ExportedGraph& graph)
+{
+    const std::map<std::string, ExportedTensorMeta>::const_iterator meta_it = graph.tensor_values.find(name);
+    if (meta_it == graph.tensor_values.end())
+        return false;
+
+    return meta_it->second.dtype == 8 || meta_it->second.dtype == 11; // Double or ComplexDouble
+}
+
+static bool exported_argument_uses_high_precision_float(const ExportedArgument& argument, const ExportedGraph& graph)
+{
+    if (argument.type == EXPORTED_ARGUMENT_TENSOR)
+        return exported_tensor_uses_high_precision_float(argument.name, graph);
+
+    if (argument.type == EXPORTED_ARGUMENT_TENSOR_LIST)
+    {
+        for (size_t i = 0; i < argument.tensor_names.size(); i++)
+        {
+            if (exported_tensor_uses_high_precision_float(argument.tensor_names[i], graph))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+static void report_exported_float_narrowing(const ExportedNode& node, const std::string& argument_name, double value, std::set<std::string>& warnings)
+{
+    float converted = 0.f;
+    if (exported_float_to_pnnx(value, converted) != 0 || (double)converted == value)
+        return;
+
+    std::ostringstream message;
+    message << "warning: lossy scalar narrowing for " << node.target
+            << " argument " << argument_name << ": "
+            << std::setprecision(std::numeric_limits<double>::max_digits10) << value
+            << " -> " << std::setprecision(std::numeric_limits<float>::max_digits10) << converted
+            << " in f64/c128 tensor context";
+    if (warnings.insert(message.str()).second)
+        fprintf(stderr, "%s\n", message.str().c_str());
+}
+
+static void report_exported_scalar_narrowing(const ExportedNode& node,
+                                             const std::vector<CanonicalExportedArgument>& arguments,
+                                             const ExportedGraph& graph,
+                                             std::set<std::string>& warnings)
+{
+    bool has_high_precision_tensor = false;
+    for (size_t i = 0; i < arguments.size() && !has_high_precision_tensor; i++)
+        has_high_precision_tensor = exported_argument_uses_high_precision_float(arguments[i].value, graph);
+    for (size_t i = 0; i < node.outputs.size() && !has_high_precision_tensor; i++)
+        has_high_precision_tensor = exported_argument_uses_high_precision_float(node.outputs[i], graph);
+    if (!has_high_precision_tensor)
+        return;
+
+    for (size_t i = 0; i < arguments.size(); i++)
+    {
+        const CanonicalExportedArgument& argument = arguments[i];
+        if (argument.value.type == EXPORTED_ARGUMENT_FLOAT)
+        {
+            report_exported_float_narrowing(node, argument.name, argument.value.float_value, warnings);
+        }
+        else if (argument.value.type == EXPORTED_ARGUMENT_FLOAT_LIST)
+        {
+            for (size_t j = 0; j < argument.value.float_values.size(); j++)
+            {
+                std::ostringstream item_name;
+                item_name << argument.name << '[' << j << ']';
+                report_exported_float_narrowing(node, item_name.str(), argument.value.float_values[j], warnings);
+            }
+        }
+        else if (argument.value.type == EXPORTED_ARGUMENT_COMPLEX)
+        {
+            report_exported_float_narrowing(node, argument.name + ".real", argument.value.complex_real_value, warnings);
+            report_exported_float_narrowing(node, argument.name + ".imag", argument.value.complex_imag_value, warnings);
+        }
+    }
 }
 
 static int exported_memory_format_to_pnnx(int64_t value, int& converted)
@@ -1002,6 +1083,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
     Graph candidate;
     std::map<std::string, Operand*> values;
     std::map<std::string, ExportedTensorSources> sources;
+    std::set<std::string> scalar_narrowing_warnings;
     std::set<std::string> operand_names;
     std::set<std::string> operator_names;
     std::map<std::string, size_t> state_uses;
@@ -1092,6 +1174,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
         ExportedOperatorEffects effects;
         if (canonicalize_exported_arguments(node, source_program.header, target, arguments, effects, error) != 0)
             return -1;
+        report_exported_scalar_narrowing(node, arguments, normalized_graph, scalar_narrowing_warnings);
         if (propagate_exported_effects(node, target, arguments, effects, source_program, normalized_graph, sources, error) != 0)
             return -1;
 

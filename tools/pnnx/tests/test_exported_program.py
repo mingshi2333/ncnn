@@ -1128,6 +1128,65 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
                 "floating-point value 1e+100 does not fit pnnx float parameter",
             )
 
+    def test_high_precision_scalar_narrowing_is_reported(self):
+        class HighPrecisionModel(torch.nn.Module):
+            def forward(self, x):
+                left = (x + 16777217.0) - 16777216.0
+                right = (x + 16777217.0) - 16777216.0
+                return left, right
+
+        class ExactlyRepresentableModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.5
+
+        class OrdinaryFloatModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 0.1
+
+        warning = "warning: lossy scalar narrowing"
+        cases = (
+            (
+                "lossy_f64",
+                HighPrecisionModel(),
+                torch.zeros(2, dtype=torch.float64),
+                (
+                    warning,
+                    "torch.ops.aten.add.Tensor",
+                    "argument other",
+                    "16777217",
+                    "16777216",
+                ),
+            ),
+            (
+                "exact_f64",
+                ExactlyRepresentableModel(),
+                torch.zeros(2, dtype=torch.float64),
+                (),
+            ),
+            (
+                "ordinary_f32",
+                OrdinaryFloatModel(),
+                torch.zeros(2, dtype=torch.float32),
+                (),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+            for label, model, example_input, messages in cases:
+                with self.subTest(case=label):
+                    archive_path = work_dir / f"narrowing_{label}.pt2"
+                    save_exported_program(model, archive_path, (example_input,))
+                    result = run_pnnx(work_dir, archive_path)
+                    stderr = result.stderr.decode(errors="replace")
+                    self.assertEqual(result.returncode, 0, stderr)
+                    if messages:
+                        for message in messages:
+                            self.assertIn(message, stderr)
+                        self.assertEqual(stderr.count(warning), 1)
+                    else:
+                        self.assertNotIn(warning, stderr)
+
     def test_infinite_float_parameter_uses_pnnx_sentinel(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             work_dir = Path(temp_dir)

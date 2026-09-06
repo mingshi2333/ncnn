@@ -66,7 +66,7 @@ The input shapes and model state are read from the PT2 package. Parameters, pers
 python -c 'import model_pnnx; model_pnnx.export_exported_program()'
 ```
 
-This creates `model_pnnx.pt2` and returns the `torch.export.ExportedProgram` object. Pass a tuple to `export_exported_program(example_inputs)` to override the generated example inputs.
+This exports the inference graph of the generated PNNX Python `Model`, creates `model_pnnx.pt2`, and returns that `torch.export.ExportedProgram` object. It is not a serialization round trip of the original Python module. Pass a tuple to `export_exported_program(example_inputs)` to override the generated example inputs.
 
 ### Current ExportedProgram support
 
@@ -74,9 +74,10 @@ This creates `model_pnnx.pt2` and returns the `torch.export.ExportedProgram` obj
 - PyTorch 2.13 ExportedProgram schema 8.20 with raw tensor payloads; compatibility paths for the older raw-payload schema minors 8.14, 8.15 and 8.17 are retained but are not part of the continuously tested compatibility contract
 - Inference graphs with protocol-1 positional tensor input PyTrees composed only of tuple/list containers; their leaves are flattened in treespec order at the PNNX model boundary, while tensor output leaves may be reconstructed into protocol-1 tuple/list trees
 - Static tensor shapes, including statically resolved `SymInt`, `SymFloat` and `SymBool` operator arguments
-- Parameters, persistent and non-persistent buffers, and tensor constants with raw strided tensor payloads, including shape, stride and storage offset
+- Inference-state values, shapes and data types from parameters, persistent and non-persistent buffers, and tensor constants, with raw strided tensor payloads including stride and storage offset; payload layout is used for state materialization, not as a runtime input-stride contract, and the original state category and training identity are not preserved
 - Byte, Char, Short, Int, Long, Half, Float, Double, ComplexHalf, ComplexFloat, ComplexDouble, Bool and BFloat16 state tensors
 - Generated PNNX python helpers preserve imported ExportedProgram state data types instead of converting the model to Float
+- Finite non-tensor Float, Float-list and Complex arguments continue to use PNNX float parameters. When such a value is narrowed in a node with an f64 or c128 tensor input or output, pnnx reports the operator target, argument and before/after values once per distinct warning. This diagnostic makes detected loss visible; it does not guarantee end-to-end double-precision scalar or Expression arithmetic
 - ATen operator targets registered by the linked libtorch dispatcher when their serialized arguments can be represented and the resulting graph can be lowered by the existing PNNX passes
 - `torch.ops.aten.einsum.default` equation syntax and input/output ranks are validated without executing the operator, then whitespace is removed before PNNX parameter serialization; scalar tensor operands are rejected because current PNNX einsum lowering cannot preserve them, and string arguments for other operators are not normalized
 - Disabled `wrap_with_set_grad_enabled` and `wrap_with_autocast` higher-order wrappers with tensor-only captured graphs
@@ -90,6 +91,8 @@ This creates `model_pnnx.pt2` and returns the `torch.export.ExportedProgram` obj
 - Dynamic tensor dimensions, range constraints, symbolic expressions or symbolic scalar dataflow, and dynamic model state
 - Keyword inputs, positional input PyTrees containing dict, namedtuple or custom containers, and output PyTrees containing dict, namedtuple or custom containers
 - Training graphs, loss or gradient outputs, and parameter, buffer or user-input mutation outputs
+- Lossless restoration of original module state identity or training semantics. An imported state tensor may be emitted as a generated Python `Parameter` regardless of whether it originated as a parameter, persistent buffer, non-persistent buffer or tensor constant; original `requires_grad`, buffer persistence, `state_dict` keys and parameter/buffer registration are not a round-trip contract
+- End-to-end f64/c128 fidelity for non-tensor scalar parameters and Expressions; high-precision tensor payload and dtype restoration does not widen PNNX scalar parameter storage beyond float
 - Custom objects, tokens, unknown higher-order operators, enabled autocast/set-grad wrappers and control-flow or mutation higher-order operators
 - Non-tensor user input or output leaves, unsupported serialized operator arguments, and graphs which the existing PNNX passes cannot lower
 - Generated native ncnn python inference with Bool, BFloat16, complex or scalar tensor inputs; ExportedProgram conversion and generated PNNX python inference remain supported
