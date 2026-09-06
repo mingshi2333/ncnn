@@ -213,13 +213,27 @@ static int validate_signature_arguments(const ExportedProgram& source_program, c
 
 static std::string unique_name(const std::string& requested, std::set<std::string>& names)
 {
-    if (names.insert(requested).second)
-        return requested;
+    std::string sanitized;
+    sanitized.reserve(requested.size() + 5);
+    for (size_t i = 0; i < requested.size(); i++)
+    {
+        const char ch = requested[i];
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')
+            sanitized += ch;
+        else
+            sanitized += '_';
+    }
+
+    if (sanitized.empty() || (sanitized[0] >= '0' && sanitized[0] <= '9'))
+        sanitized.insert(0, "pnnx_");
+
+    if (names.insert(sanitized).second)
+        return sanitized;
 
     for (size_t suffix = 1;; suffix++)
     {
         std::ostringstream candidate;
-        candidate << requested << '_' << suffix;
+        candidate << sanitized << '_' << suffix;
         if (names.insert(candidate.str()).second)
             return candidate.str();
     }
@@ -1025,8 +1039,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
             std::ostringstream state_name;
             state_name << "pnnx_state_" << i;
             Operator* op = candidate.new_operator("pnnx.Attribute", unique_name(state_name.str(), operator_names));
-            Operand* operand = candidate.new_operand(name);
-            operand_names.insert(name);
+            Operand* operand = candidate.new_operand(unique_name(name, operand_names));
             operand->producer = op;
             op->outputs.push_back(operand);
             if (set_tensor_metadata(normalized_graph, name, operand, error) != 0)
@@ -1063,8 +1076,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
         std::ostringstream input_name;
         input_name << "pnnx_input_" << input_index++;
         Operator* op = candidate.new_operator("pnnx.Input", unique_name(input_name.str(), operator_names));
-        Operand* operand = candidate.new_operand(name);
-        operand_names.insert(name);
+        Operand* operand = candidate.new_operand(unique_name(name, operand_names));
         operand->producer = op;
         op->outputs.push_back(operand);
         if (set_tensor_metadata(normalized_graph, name, operand, error) != 0)
@@ -1219,8 +1231,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
                     error = "tensor value " + name + " is defined more than once";
                     return -1;
                 }
-                Operand* operand = candidate.new_operand(name);
-                operand_names.insert(name);
+                Operand* operand = candidate.new_operand(unique_name(name, operand_names));
                 operand->producer = op;
                 op->outputs.push_back(operand);
                 if (set_tensor_metadata(normalized_graph, name, operand, error) != 0)
@@ -1248,8 +1259,7 @@ static int lower_exported_program(const ExportedProgram& source_program,
                         error = "tensor value " + name + " is defined more than once";
                         return -1;
                     }
-                    Operand* operand = candidate.new_operand(name);
-                    operand_names.insert(name);
+                    Operand* operand = candidate.new_operand(unique_name(name, operand_names));
                     operand->producer = unpack;
                     unpack->outputs.push_back(operand);
                     if (set_tensor_metadata(normalized_graph, name, operand, error) != 0)

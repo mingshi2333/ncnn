@@ -203,6 +203,18 @@ class StateNameCollisionModel(torch.nn.Module):
         return x * self.foo.weight + self.foo_weight
 
 
+class ValueNameModel(torch.nn.Module):
+    def forward(self, x):
+        added = x + 2
+        return added, torch.relu(added)
+
+
+class TensorListValueNameModel(torch.nn.Module):
+    def forward(self, x):
+        values = torch.ops.aten.split.Tensor(x, 1)
+        return values[0], values[1]
+
+
 class StaticSymbolArgumentModel(torch.nn.Module):
     def forward(self, x):
         x = torch.ops.aten.leaky_relu.default(x, 0.25)
@@ -308,6 +320,45 @@ def rewrite_model_json(source_path, destination_path, mutate):
         ).encode()
 
     rewrite_archive(source_path, destination_path, mutate_entries)
+
+
+def rename_exported_tensor_values(document, replacements):
+    graph_module = document["graph_module"]
+    graph = graph_module["graph"]
+
+    def rename_argument(argument):
+        if isinstance(argument, list):
+            for item in argument:
+                rename_argument(item)
+            return
+        if not isinstance(argument, dict):
+            return
+
+        tensor = argument.get("as_tensor")
+        if isinstance(tensor, dict) and tensor.get("name") in replacements:
+            tensor["name"] = replacements[tensor["name"]]
+
+        tensors = argument.get("as_tensors")
+        if isinstance(tensors, list):
+            for item in tensors:
+                if item.get("name") in replacements:
+                    item["name"] = replacements[item["name"]]
+
+        for value in argument.values():
+            rename_argument(value)
+
+    rename_argument(graph["inputs"])
+    rename_argument(graph["outputs"])
+    for node in graph["nodes"]:
+        for node_input in node["inputs"]:
+            rename_argument(node_input["arg"])
+        rename_argument(node["outputs"])
+    rename_argument(graph_module["signature"])
+
+    graph["tensor_values"] = {
+        replacements.get(name, name): metadata
+        for name, metadata in graph["tensor_values"].items()
+    }
 
 
 def rewrite_payload_configs(source_path, destination_path, mutate):
@@ -1209,6 +1260,115 @@ class ExportedProgramEndToEndTest(unittest.TestCase):
             self.assert_conversion_matches(
                 work_dir, archive_path, expected
             )
+
+    def test_tensor_names_remain_distinct_at_optlevel_one(self):
+        input_value = torch.tensor([-3.0, 1.0])
+        value_model = ValueNameModel().eval()
+        tensor_list_model = TensorListValueNameModel().eval()
+        cases = (
+            (
+                "intermediate_collision",
+                value_model,
+                {"add": "x.y", "relu": "x_y"},
+                (torch.tensor([-1.0, 3.0]), torch.tensor([0.0, 3.0])),
+            ),
+            ("hyphen", value_model, {"add": "x-y"}, value_model(input_value)),
+            ("space", value_model, {"add": "x y"}, value_model(input_value)),
+            ("colon", value_model, {"add": "x:y"}, value_model(input_value)),
+            ("slash", value_model, {"add": "x/y"}, value_model(input_value)),
+            ("leading_digit", value_model, {"add": "1value"}, value_model(input_value)),
+            ("keyword", value_model, {"add": "class"}, value_model(input_value)),
+            ("generated", value_model, {"add": "pnnx_0"}, value_model(input_value)),
+            (
+                "input_collision",
+                value_model,
+                {"x": "x_y", "add": "x.y"},
+                value_model(input_value),
+            ),
+            (
+                "tensor_list_collision",
+                tensor_list_model,
+                {"getitem": "x.y", "getitem_1": "x_y"},
+                tensor_list_model(input_value),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+            sources = {}
+            for model in (value_model, tensor_list_model):
+                source_path = work_dir / f"{type(model).__name__}.pt2"
+                save_exported_program(model, source_path, (input_value,))
+                sources[type(model)] = source_path
+
+            for label, model, replacements, expected in cases:
+                with self.subTest(case=label):
+                    archive_path = work_dir / f"value_name_{label}.pt2"
+                    rewrite_model_json(
+                        sources[type(model)],
+                        archive_path,
+                        lambda document: rename_exported_tensor_values(
+                            document, replacements
+                        ),
+                    )
+
+                    loaded = torch.export.load(archive_path)
+                    self.assert_nested_close(
+                        expected, loaded.module()(input_value)
+                    )
+
+                    result = run_pnnx(
+                        work_dir, archive_path, "optlevel=1", "fp16=0"
+                    )
+                    if label != "tensor_list_collision":
+                        self.assertEqual(
+                            result.returncode,
+                            0,
+                            result.stderr.decode(errors="replace"),
+                        )
+
+                    param_lines = archive_path.with_suffix(
+                        ".pnnx.param"
+                    ).read_text().splitlines()[3:]
+                    operator_names = []
+                    operand_names = []
+                    for line in param_lines:
+                        fields = line.split()
+                        input_count = int(fields[2])
+                        output_count = int(fields[3])
+                        operator_names.append(fields[1])
+                        operand_names.extend(
+                            fields[
+                                4 + input_count:
+                                4 + input_count + output_count
+                            ]
+                        )
+                    self.assertEqual(
+                        len(operator_names), len(set(operator_names))
+                    )
+                    self.assertEqual(
+                        len(operand_names), len(set(operand_names))
+                    )
+                    for name in operand_names:
+                        self.assertRegex(name, r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+                    generated_path = work_dir / f"{archive_path.stem}_pnnx.py"
+                    generated_source = generated_path.read_text()
+                    compile(generated_source, str(generated_path), "exec")
+                    spec = importlib.util.spec_from_file_location(
+                        f"test_value_name_{label}", generated_path
+                    )
+                    self.assertIsNotNone(spec)
+                    self.assertIsNotNone(spec.loader)
+                    module = importlib.util.module_from_spec(spec)
+                    previous_work_dir = Path.cwd()
+                    try:
+                        os.chdir(work_dir)
+                        spec.loader.exec_module(module)
+                        actual = module.Model().eval()(input_value)
+                    finally:
+                        os.chdir(previous_work_dir)
+                    self.assert_nested_close(expected, actual)
 
     def test_dtype_stride_and_shared_storage(self):
         with tempfile.TemporaryDirectory() as temp_dir:
