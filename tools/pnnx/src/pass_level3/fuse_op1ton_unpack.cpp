@@ -1,16 +1,5 @@
-// Tencent is pleased to support the open source community by making ncnn available.
-//
-// Copyright (C) 2021 THL A29 Limited, a Tencent company. All rights reserved.
-//
-// Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
-//
-// https://opensource.org/licenses/BSD-3-Clause
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
+// Copyright 2021 Tencent
+// SPDX-License-Identifier: BSD-3-Clause
 
 #include "fuse_op1ton_unpack.h"
 #include <algorithm>
@@ -18,7 +7,7 @@
 
 namespace pnnx {
 
-void fuse_op1ton_unpack(Graph& graph)
+void fuse_op1ton_unpack(Graph& graph, bool fuse_single_output)
 {
     while (1)
     {
@@ -39,6 +28,10 @@ void fuse_op1ton_unpack(Graph& graph)
 
             Operator* op2 = op->outputs[0]->consumers[0];
             if (op2->type != "prim::ListUnpack")
+                continue;
+
+            // Keep single-output unpacking explicit in the PNNX graph and Python.
+            if (!fuse_single_output && op2->outputs.size() == 1)
                 continue;
 
             matched = true;

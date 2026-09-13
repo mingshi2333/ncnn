@@ -19,6 +19,11 @@ if(MSVC AND NOT CMAKE_VERSION VERSION_LESS "3.15")
     endif()
 endif()
 
+if(POLICY CMP0094)
+    cmake_policy(SET CMP0094 NEW)  # FindPython should return the first matching Python
+endif()
+set(Python_FIND_REGISTRY "LAST")
+set(Python_FIND_FRAMEWORK "LAST")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(PNNXPyTorch)
 
@@ -33,6 +38,7 @@ option(PNNX_COVERAGE "build for coverage" OFF)
 
 # set(Torch_INSTALL_DIR "/home/nihui/osd/pnnx/install" CACHE STRING "")
 # set(TorchVision_INSTALL_DIR "/home/nihui/osd/pnnx/install" CACHE STRING "")
+# set(protobuf_DIR "/home/nihui/osd/pnnx/install/lib64/cmake/protobuf" CACHE STRING "")
 
 # set(Torch_DIR "${Torch_INSTALL_DIR}/share/cmake/Torch")
 set(TorchVision_DIR "${TorchVision_INSTALL_DIR}/share/cmake/TorchVision")
@@ -53,7 +59,10 @@ if(Torch_VERSION VERSION_LESS "1.8")
     message(FATAL_ERROR "pnnx only supports PyTorch >= 1.8")
 endif()
 
-if(Torch_VERSION VERSION_GREATER_EQUAL "2.1")
+if(Torch_VERSION VERSION_GREATER_EQUAL "2.13")
+    # c++20 is required for using torch 2.13+ headers
+    set(CMAKE_CXX_STANDARD 20)
+elseif(Torch_VERSION VERSION_GREATER_EQUAL "2.1")
     # c++17 is required for using torch 2.1+ headers
     set(CMAKE_CXX_STANDARD 17)
 endif()
@@ -77,7 +86,7 @@ else()
     message(WARNING "Building without TorchVision")
 endif()
 
-include_directories(${TORCH_INCLUDE_DIRS})
+include_directories(SYSTEM ${TORCH_INCLUDE_DIRS})
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     # test if libtorch and protobuf has the same cxxabi version
@@ -116,6 +125,8 @@ if(onnxruntime_LIB)
 else()
     set(onnxruntime_FOUND FALSE)
 endif()
+
+option(PNNX_TNN2PNNX "build tnn2pnnx" ON)
 
 add_subdirectory(src)
 

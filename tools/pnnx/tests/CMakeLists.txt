@@ -1,8 +1,53 @@
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+add_executable(pnnx_test_exported_program_parameter_roundtrip
+    test_exported_program_parameter_roundtrip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ir.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/model_stat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/storezip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/utils.cpp
+)
+target_include_directories(pnnx_test_exported_program_parameter_roundtrip PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
+add_test(
+    NAME test_exported_program_parameter_roundtrip
+    COMMAND $<TARGET_FILE:pnnx_test_exported_program_parameter_roundtrip>
+)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test_exported_program_parameter_roundtrip")
+set_tests_properties(test_exported_program_parameter_roundtrip PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test_exported_program_parameter_roundtrip"
+)
+
+add_test(
+    NAME test_exported_program
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program.py $<TARGET_FILE:pnnx> --ir-roundtrip-executable $<TARGET_FILE:pnnx_test_exported_program_parameter_roundtrip>
+)
+
+add_test(
+    NAME test_exported_program_roundtrip
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_exported_program_roundtrip.py $<TARGET_FILE:pnnx>
+)
+
+set_tests_properties(test_exported_program PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(
+    NAME test_pnnx_test_utils
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_pnnx_test_utils.py
+)
+
+set_tests_properties(test_exported_program_parameter_roundtrip test_exported_program test_exported_program_roundtrip test_pnnx_test_utils PROPERTIES
+    LABELS "pt2;pt2_frontend"
+)
+
+macro(pnnx_add_pt2_test name)
+    add_test(NAME test_pt2_${name} COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_pt2_test.py --pnnx $<TARGET_FILE:pnnx> --build-dir ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py)
+    set_tests_properties(test_pt2_${name} PROPERTIES SKIP_RETURN_CODE 77 LABELS "pt2;pt2_operator")
+endmacro()
+
 macro(pnnx_add_test name)
-    add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
+    add_test(NAME test_${name} COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE} -DPNNX_TEST_FORMAT=torchscript -DPNNX_EXECUTABLE=$<TARGET_FILE:pnnx> -DPYTHON_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
+    pnnx_add_pt2_test(${name})
 endmacro()
 
 pnnx_add_test(F_adaptive_avg_pool1d)
@@ -167,7 +212,6 @@ pnnx_add_test(nn_UpsamplingBilinear2d)
 pnnx_add_test(nn_UpsamplingNearest2d)
 pnnx_add_test(nn_ZeroPad2d)
 
-pnnx_add_test(Tensor_contiguous)
 pnnx_add_test(Tensor_expand)
 pnnx_add_test(Tensor_fill)
 pnnx_add_test(Tensor_index)
@@ -180,12 +224,16 @@ pnnx_add_test(Tensor_new_zeros)
 pnnx_add_test(Tensor_permute)
 pnnx_add_test(Tensor_repeat)
 pnnx_add_test(Tensor_reshape)
+pnnx_add_test(Tensor_reshape_as)
 pnnx_add_test(Tensor_select)
 pnnx_add_test(Tensor_slice)
 pnnx_add_test(Tensor_slice_copy)
 pnnx_add_test(Tensor_to)
 pnnx_add_test(Tensor_type_as)
+pnnx_add_test(Tensor_unflatten)
 pnnx_add_test(Tensor_view)
+
+pnnx_add_test(pnnx_model_stat)
 
 pnnx_add_test(torch_addmm)
 pnnx_add_test(torch_amax)
@@ -211,6 +259,7 @@ pnnx_add_test(torch_einsum)
 pnnx_add_test(torch_eq)
 pnnx_add_test(torch_diag)
 pnnx_add_test(torch_flatten)
+pnnx_add_test(torch_flip)
 pnnx_add_test(torch_full)
 pnnx_add_test(torch_full_like)
 pnnx_add_test(torch_gather)
@@ -219,6 +268,10 @@ pnnx_add_test(torch_gt)
 pnnx_add_test(torch_index_select)
 pnnx_add_test(torch_le)
 pnnx_add_test(torch_lgamma)
+pnnx_add_test(torch_logical_not)
+pnnx_add_test(torch_logical_and)
+pnnx_add_test(torch_logical_or)
+pnnx_add_test(torch_logical_xor)
 pnnx_add_test(torch_logsumexp)
 pnnx_add_test(torch_lt)
 pnnx_add_test(torch_masked_select)
@@ -249,6 +302,7 @@ pnnx_add_test(torch_tensor_split)
 pnnx_add_test(torch_tile)
 pnnx_add_test(torch_topk)
 pnnx_add_test(torch_transpose)
+pnnx_add_test(torch_tril)
 pnnx_add_test(torch_unbind)
 pnnx_add_test(torch_unsqueeze)
 pnnx_add_test(torch_view_as_complex)
@@ -294,11 +348,13 @@ pnnx_add_test(torch_clamp)
 pnnx_add_test(torch_cos)
 pnnx_add_test(torch_cosh)
 pnnx_add_test(torch_exp)
+pnnx_add_test(torch_expm1)
 pnnx_add_test(torch_floor)
 pnnx_add_test(torch_imag)
 pnnx_add_test(torch_log)
 pnnx_add_test(torch_log10)
 pnnx_add_test(torch_logaddexp)
+pnnx_add_test(torch_log1p)
 pnnx_add_test(torch_maximum)
 pnnx_add_test(torch_minimum)
 pnnx_add_test(torch_neg)
@@ -329,6 +385,7 @@ pnnx_add_test(ir_complex)
 
 # TODO enable end2end quantization model test
 #pnnx_add_test(quantization_shufflenet_v2_x1_0)
+pnnx_add_pt2_test(quantization_shufflenet_v2_x1_0)
 
 pnnx_add_test(pnnx_eliminate_noop_cat)
 pnnx_add_test(pnnx_eliminate_noop_expand)
@@ -336,6 +393,11 @@ pnnx_add_test(pnnx_eliminate_noop_math)
 pnnx_add_test(pnnx_eliminate_noop_upsample)
 pnnx_add_test(pnnx_expression)
 pnnx_add_test(pnnx_fold_constant)
+pnnx_add_test(pnnx_input_npy)
+set_tests_properties(test_pnnx_input_npy test_pt2_pnnx_input_npy PROPERTIES
+    RESOURCE_LOCK pnnx_input_npy_fixtures
+)
+pnnx_add_test(pnnx_fuse_channel_shuffle)
 pnnx_add_test(pnnx_fuse_conv1d_batchnorm1d)
 pnnx_add_test(pnnx_fuse_conv2d_batchnorm2d)
 pnnx_add_test(pnnx_fuse_conv3d_batchnorm3d)
@@ -350,15 +412,61 @@ pnnx_add_test(pnnx_fuse_rmsnorm)
 pnnx_add_test(pnnx_fuse_scaled_dot_product_attention)
 pnnx_add_test(pnnx_fuse_select_to_unbind)
 pnnx_add_test(pnnx_fuse_slice_to_tensor_split)
+pnnx_add_test(pnnx_fuse_adjacent_permute)
 pnnx_add_test(pnnx_fuse_adjacent_reshape)
 pnnx_add_test(pnnx_fuse_pad_conv1d)
+pnnx_add_test(pnnx_fuse_asymmetric_pad_conv2d)
 pnnx_add_test(pnnx_fuse_pad_conv2d)
+pnnx_add_test(pnnx_fuse_pixel_shuffle)
 pnnx_add_test(pnnx_fuse_pixel_unshuffle)
 
 if(TorchVision_FOUND)
     pnnx_add_test(torchvision_DeformConv2d)
     pnnx_add_test(torchvision_RoIAlign)
 endif()
+
+pnnx_add_test(torchaudio_F_inverse_spectrogram)
+pnnx_add_test(torchaudio_F_spectrogram)
+pnnx_add_test(torchaudio_InverseSpectrogram)
+pnnx_add_test(torchaudio_Spectrogram)
+
+pnnx_add_test(transformers_albert_attention)
+pnnx_add_test(transformers_bart_attention)
+pnnx_add_test(transformers_bert_attention)
+pnnx_add_test(transformers_bert_generation_attention)
+pnnx_add_test(transformers_blenderbot_attention)
+pnnx_add_test(transformers_camembert_attention)
+pnnx_add_test(transformers_clip_attention)
+pnnx_add_test(transformers_chinese_clip_attention)
+pnnx_add_test(transformers_ctrl_attention)
+pnnx_add_test(transformers_deberta_attention)
+pnnx_add_test(transformers_deepseek_v3_attention)
+pnnx_add_test(transformers_distilbert_attention)
+pnnx_add_test(transformers_electra_attention)
+pnnx_add_test(transformers_flaubert_attention)
+pnnx_add_test(transformers_fsmt_attention)
+pnnx_add_test(transformers_funnel_attention)
+pnnx_add_test(transformers_gpt2_attention)
+pnnx_add_test(transformers_layoutlm_attention)
+pnnx_add_test(transformers_longformer_attention)
+pnnx_add_test(transformers_lxmert_attention)
+pnnx_add_test(transformers_m2m_100_attention)
+pnnx_add_test(transformers_marian_attention)
+pnnx_add_test(transformers_mbart_attention)
+pnnx_add_test(transformers_mobilebert_attention)
+pnnx_add_test(transformers_mt5_attention)
+pnnx_add_test(transformers_openai_attention)
+pnnx_add_test(transformers_pegasus_attention)
+pnnx_add_test(transformers_prophetnet_attention)
+pnnx_add_test(transformers_qwen2_attention)
+pnnx_add_test(transformers_qwen3_attention)
+pnnx_add_test(transformers_reformer_attention)
+pnnx_add_test(transformers_roberta_attention)
+pnnx_add_test(transformers_squeezebert_attention)
+pnnx_add_test(transformers_t5_attention)
+pnnx_add_test(transformers_xlm_attention)
+pnnx_add_test(transformers_xlm_roberta_attention)
+pnnx_add_test(transformers_xlnet_attention)
 
 add_subdirectory(ncnn)
 

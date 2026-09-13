@@ -1,21 +1,12 @@
-# Tencent is pleased to support the open source community by making ncnn available.
-#
-# Copyright (C) 2022 THL A29 Limited, a Tencent company. All rights reserved.
-#
-# Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-# in compliance with the License. You may obtain a copy of the License at
-#
-# https://opensource.org/licenses/BSD-3-Clause
-#
-# Unless required by applicable law or agreed to in writing, software distributed
-# under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-# CONDITIONS OF ANY KIND, either express or implied. See the License for the
-# specific language governing permissions and limitations under the License.
+# Copyright 2022 Tencent
+# SPDX-License-Identifier: BSD-3-Clause
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from packaging import version
+
+from pnnx_test_utils import convert_and_import
 
 class Model(nn.Module):
     def __init__(self):
@@ -39,17 +30,14 @@ def test():
 
     a0, a1, a2 = net(x, y, z)
 
-    # export torchscript
-    mod = torch.jit.trace(net, (x, y, z))
-    mod.save("test_F_fold.pt")
+    mod = convert_and_import(
+        net,
+        (x, y, z),
+        "test_F_fold",
+        pnnx_args=("inputshape=[1,108,400],[1,96,190],[1,36,120]",),
+    )
 
-    # torchscript to pnnx
-    import os
-    os.system("../src/pnnx test_F_fold.pt inputshape=[1,108,400],[1,96,190],[1,36,120]")
-
-    # pnnx inference
-    import test_F_fold_pnnx
-    b0, b1, b2 = test_F_fold_pnnx.test_inference()
+    b0, b1, b2 = mod.test_inference()
 
     return torch.equal(a0, b0) and torch.equal(a1, b1) and torch.equal(a2, b2)
 

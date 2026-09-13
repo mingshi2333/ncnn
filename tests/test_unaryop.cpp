@@ -1,20 +1,9 @@
-// Tencent is pleased to support the open source community by making ncnn available.
-//
-// Copyright (C) 2020 THL A29 Limited, a Tencent company. All rights reserved.
-//
-// Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
-//
-// https://opensource.org/licenses/BSD-3-Clause
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
+// Copyright 2020 Tencent
+// SPDX-License-Identifier: BSD-3-Clause
 
 #include "testutil.h"
 
-#define OP_TYPE_MAX 20
+#define OP_TYPE_MAX 28
 
 static int op_type = 0;
 
@@ -34,11 +23,46 @@ static int test_unaryop(const ncnn::Mat& _a)
         // value must be positive for sqrt rsqrt log
         Randomize(a, 0.001f, 2.f);
     }
+    if (op_type == 25)
+    {
+        // value must be >= 1 for acosh
+        Randomize(a, 1.001f, 2.f);
+    }
     if (op_type == 11 || op_type == 12 || op_type == 13)
     {
         // smaller range for tan asin acos
         Randomize(a, -1.f, 1.f);
     }
+    if (op_type == 26)
+    {
+        // keep away from +/-1 so bf16 input casting does not round into the singularity
+        Randomize(a, -0.99f, 0.99f);
+    }
+    if (op_type == 27)
+    {
+        // leave margin above -1 for reduced precision log1p
+        Randomize(a, -0.99f, 2.f);
+    }
+#if __powerpc__
+    // nearbyintf produces wrong result in halfway cases, why ?
+    // too troublesome to resolve the compiler or qemu problem
+    // so just skip them   --- nihui
+    if (op_type == 18)
+    {
+        // drop 0.4 ~ 0.6
+        for (int i = 0; i < a.total(); i++)
+        {
+            float v = a[i];
+            float vv = fabs(v - (int)v);
+            while (vv > 0.4f && vv < 0.6f)
+            {
+                v = RandomFloat(-15, 15);
+                vv = fabs(v - (int)v);
+            }
+            a[i] = v;
+        }
+    }
+#endif // __powerpc__
 
     ncnn::ParamDict pd;
     pd.set(0, op_type);

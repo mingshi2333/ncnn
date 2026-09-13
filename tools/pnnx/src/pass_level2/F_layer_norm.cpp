@@ -1,16 +1,5 @@
-// Tencent is pleased to support the open source community by making ncnn available.
-//
-// Copyright (C) 2021 THL A29 Limited, a Tencent company. All rights reserved.
-//
-// Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
-//
-// https://opensource.org/licenses/BSD-3-Clause
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
+// Copyright 2021 Tencent
+// SPDX-License-Identifier: BSD-3-Clause
 
 #include "pass_level2.h"
 
@@ -40,7 +29,7 @@ pnnx.Output             output      1 0 out
     }
 };
 
-REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm, 10)
+REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm, 130)
 
 class F_layer_norm_onnx : public GraphRewriterPass
 {
@@ -52,7 +41,7 @@ public:
 pnnx.Input              input_0     0 1 input
 pnnx.Input              input_1     0 1 weight
 pnnx.Input              input_2     0 1 bias
-LayerNormalization      op_0        3 1 input weight bias out axis=%axis epsilon=%epsilon
+LayerNormalization      op_0        3 1 input weight bias out %*=%*
 pnnx.Output             output      1 0 out
 )PNNXIR";
     }
@@ -66,24 +55,65 @@ pnnx.Output             output      1 0 out
     {
         const int input_rank = op->inputs[0]->shape.size();
 
-        int axis = captured_params.at("axis").i;
+        int axis = -1;
+        if (captured_params.find("op_0.axis") != captured_params.end())
+        {
+            axis = captured_params.at("op_0.axis").i;
+        }
+
+        float epsilon = 1e-05;
+        if (captured_params.find("op_0.epsilon") != captured_params.end())
+        {
+            epsilon = captured_params.at("op_0.epsilon").f;
+        }
+
         if (axis < 0)
         {
-            axis = input_rank + axis;
+            if (input_rank > 0)
+                axis = input_rank + axis;
         }
 
         std::vector<int> normalized_shape;
-        for (int i = axis; i < input_rank; i++)
+        if (axis < 0 || axis > input_rank)
         {
-            normalized_shape.push_back(op->inputs[0]->shape[i]);
+            fprintf(stderr, "layer_norm with unknown input rank is not supported yet\n");
+        }
+        else
+        {
+            for (int i = axis; i < input_rank; i++)
+            {
+                normalized_shape.push_back(op->inputs[0]->shape[i]);
+            }
         }
 
         op->params["normalized_shape"] = normalized_shape;
-        op->params["eps"] = captured_params.at("epsilon");
+        op->params["eps"] = epsilon;
     }
 };
 
-REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx, 10)
+class F_layer_norm_onnx_0 : public F_layer_norm_onnx
+{
+public:
+    const char* match_pattern_graph() const
+    {
+        return R"PNNXIR(7767517
+4 3
+pnnx.Input              input_0     0 1 input
+pnnx.Input              input_1     0 1 weight
+LayerNormalization      op_0        2 1 input weight out %*=%*
+pnnx.Output             output      1 0 out
+)PNNXIR";
+    }
+
+    void write(Operator* op, const std::map<std::string, Parameter>& captured_params) const
+    {
+        F_layer_norm_onnx::write(op, captured_params);
+        op->params["bias"] = Parameter();
+    }
+};
+
+REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx, 130)
+REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_0, 130)
 
 class F_layer_norm_onnx_1 : public F_layer_norm_onnx
 {
@@ -95,7 +125,7 @@ public:
 pnnx.Input              input_0     0 1 input
 pnnx.Input              input_1     0 1 weight
 pnnx.Input              input_2     0 1 bias
-LayerNormalization      op_0        3 3 input weight bias out Mean InvStdDev axis=%axis epsilon=%epsilon stash_type=%stash_type
+LayerNormalization      op_0        3 3 input weight bias out Mean InvStdDev %*=%*
 pnnx.Output             output      3 0 out Mean InvStdDev
 )PNNXIR";
     }
@@ -114,25 +144,29 @@ pnnx.Output             output      3 0 out Mean InvStdDev
     }
 };
 
-REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_1, 10)
-
-class F_layer_norm_onnx_2 : public F_layer_norm_onnx
+class F_layer_norm_onnx_11 : public F_layer_norm_onnx_1
 {
 public:
     const char* match_pattern_graph() const
     {
         return R"PNNXIR(7767517
-5 4
+4 5
 pnnx.Input              input_0     0 1 input
 pnnx.Input              input_1     0 1 weight
-pnnx.Input              input_2     0 1 bias
-LayerNormalization      op_0        3 1 input weight bias out axis=%axis epsilon=%epsilon stash_type=%stash_type
-pnnx.Output             output      1 0 out
+LayerNormalization      op_0        2 3 input weight out Mean InvStdDev %*=%*
+pnnx.Output             output      3 0 out Mean InvStdDev
 )PNNXIR";
+    }
+
+    void write(Operator* op, const std::map<std::string, Parameter>& captured_params) const
+    {
+        F_layer_norm_onnx::write(op, captured_params);
+        op->params["bias"] = Parameter();
     }
 };
 
-REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_2, 10)
+REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_1, 130)
+REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_11, 130)
 
 class F_layer_norm_onnx_3 : public GraphRewriterPass
 {
@@ -168,7 +202,11 @@ pnnx.Output             output      1 0 out
             return false;
 
         // dim must be the last N dimensions
-        std::vector<int> dim = captured_params.at("dim").ai;
+        std::vector<int> dim;
+        if (captured_params.at("dim").type == 2)
+            dim.push_back(captured_params.at("dim").i);
+        else // if (captured_params.at("dim").type == 5)
+            dim = captured_params.at("dim").ai;
 
         const int input_rank = (int)inputshape.size();
         const int dim_count = (int)dim.size();
@@ -194,7 +232,11 @@ pnnx.Output             output      1 0 out
     void write(Operator* op, const std::map<std::string, Parameter>& captured_params) const
     {
         const std::vector<int>& inputshape = op->inputs[0]->shape;
-        const std::vector<int>& dim = captured_params.at("dim").ai;
+        std::vector<int> dim;
+        if (captured_params.at("dim").type == 2)
+            dim.push_back(captured_params.at("dim").i);
+        else // if (captured_params.at("dim").type == 5)
+            dim = captured_params.at("dim").ai;
         const int input_rank = (int)inputshape.size();
         const int dim_count = (int)dim.size();
 
@@ -211,7 +253,7 @@ pnnx.Output             output      1 0 out
     }
 };
 
-REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_3, 30)
+REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_3, 131)
 
 class F_layer_norm_onnx_4 : public GraphRewriterPass
 {
@@ -251,7 +293,11 @@ pnnx.Output             output      1 0 out
             return false;
 
         // dim must be the last N dimensions
-        std::vector<int> dim = captured_params.at("dim").ai;
+        std::vector<int> dim;
+        if (captured_params.at("dim").type == 2)
+            dim.push_back(captured_params.at("dim").i);
+        else // if (captured_params.at("dim").type == 5)
+            dim = captured_params.at("dim").ai;
 
         const int input_rank = (int)inputshape.size();
         const int dim_count = (int)dim.size();
@@ -289,7 +335,11 @@ pnnx.Output             output      1 0 out
     void write(Operator* op, const std::map<std::string, Parameter>& captured_params) const
     {
         const std::vector<int>& inputshape = op->inputs[0]->shape;
-        const std::vector<int>& dim = captured_params.at("dim").ai;
+        std::vector<int> dim;
+        if (captured_params.at("dim").type == 2)
+            dim.push_back(captured_params.at("dim").i);
+        else // if (captured_params.at("dim").type == 5)
+            dim = captured_params.at("dim").ai;
         const int input_rank = (int)inputshape.size();
         const int dim_count = (int)dim.size();
 
@@ -304,6 +354,6 @@ pnnx.Output             output      1 0 out
     }
 };
 
-REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_4, 29)
+REGISTER_GLOBAL_PNNX_GRAPH_REWRITER_PASS(F_layer_norm_onnx_4, 130)
 
 } // namespace pnnx

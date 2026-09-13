@@ -1,16 +1,5 @@
-// Tencent is pleased to support the open source community by making ncnn available.
-//
-// Copyright (C) 2022 THL A29 Limited, a Tencent company. All rights reserved.
-//
-// Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
-//
-// https://opensource.org/licenses/BSD-3-Clause
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
+// Copyright 2022 Tencent
+// SPDX-License-Identifier: BSD-3-Clause
 
 #include "insert_reshape_pooling.h"
 #include "pass_ncnn.h"
@@ -58,6 +47,7 @@ void insert_reshape_pooling(Graph& graph)
             Operand* pooling_out = op->outputs[0];
 
             const int batch_index = pooling_in->params["__batch_index"].i;
+            const int ncnn_batch_axis = pooling_in->params["__ncnn_batch_axis"].i;
 
             Operator* reshape0 = graph.new_operator_before("Tensor.reshape", op->name + "_ncnnreshape0", op);
             Operator* reshape1 = graph.new_operator_after("Tensor.reshape", op->name + "_ncnnreshape1", op);
@@ -90,6 +80,8 @@ void insert_reshape_pooling(Graph& graph)
 
             reshape0_out->params["__batch_index"] = 0;
             reshape1_in->params["__batch_index"] = batch_index;
+            reshape0_out->params["__ncnn_batch_axis"] = 0;
+            reshape1_in->params["__ncnn_batch_axis"] = ncnn_batch_axis;
 
             std::vector<int> reshape0_shape = pooling_in->shape;
             reshape0_shape.insert(reshape0_shape.begin(), 1);

@@ -1,19 +1,13 @@
-# Tencent is pleased to support the open source community by making ncnn available.
-#
-# Copyright (C) 2021 THL A29 Limited, a Tencent company. All rights reserved.
-#
-# Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-# in compliance with the License. You may obtain a copy of the License at
-#
-# https://opensource.org/licenses/BSD-3-Clause
-#
-# Unless required by applicable law or agreed to in writing, software distributed
-# under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-# CONDITIONS OF ANY KIND, either express or implied. See the License for the
-# specific language governing permissions and limitations under the License.
+# Copyright 2021 Tencent
+# SPDX-License-Identifier: BSD-3-Clause
 
 import torch
 import torchvision.models as models
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pnnx_test_utils import convert_and_import_ncnn
 
 def test():
     net = models.resnet18().half().float()
@@ -24,17 +18,10 @@ def test():
 
     a = net(x)
 
-    # export torchscript
-    mod = torch.jit.trace(net, x)
-    mod.save("test_resnet18.pt")
-
-    # torchscript to pnnx
-    import os
-    os.system("../../src/pnnx test_resnet18.pt inputshape=[1,3,224,224]")
+    module = convert_and_import_ncnn(net, (x,), "test_resnet18", pnnx_args=("inputshape=[1,3,224,224]",))
 
     # ncnn inference
-    import test_resnet18_ncnn
-    b = test_resnet18_ncnn.test_inference()
+    b = module.test_inference()
 
     return torch.allclose(a, b, 1e-2, 1e-2)
 

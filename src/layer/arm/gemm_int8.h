@@ -1,16 +1,5 @@
-// Tencent is pleased to support the open source community by making ncnn available.
-//
-// Copyright (C) 2024 THL A29 Limited, a Tencent company. All rights reserved.
-//
-// Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
-// in compliance with the License. You may obtain a copy of the License at
-//
-// https://opensource.org/licenses/BSD-3-Clause
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
+// Copyright 2024 Tencent
+// SPDX-License-Identifier: BSD-3-Clause
 
 #if NCNN_RUNTIME_CPU && NCNN_ARM84I8MM && __aarch64__ && !__ARM_FEATURE_MATMUL_INT8
 void pack_A_tile_int8_i8mm(const Mat& A, Mat& AT, int i, int max_ii, int k, int max_kk);
@@ -1717,7 +1706,7 @@ static void transpose_pack_B_tile_int8(const Mat& B, Mat& BT, int j, int max_jj,
 static void compute_A_tile_fp32_int8_scales(const Mat& A, Mat& scales, float B_scale, Mat& out_descales, int i, int max_ii)
 {
     const int elempack = A.elempack;
-    const int A_hstep = A.dims == 3 ? (int)A.cstep : A.w;
+    const size_t A_hstep = A.dims == 3 ? A.cstep : (size_t)A.w;
     const int K = A.w;
 
     // NCNN_LOGE("compute_A_tile_int8_scales %d %d", max_ii, elempack);
@@ -1885,7 +1874,7 @@ static void pack_A_tile_fp32_to_int8(const Mat& A, Mat& AT, int i, int max_ii, i
 #endif
 
     const int elempack = A.elempack;
-    const int A_hstep = A.dims == 3 ? (int)A.cstep : A.w;
+    const size_t A_hstep = A.dims == 3 ? A.cstep : (size_t)A.w;
 
     // NCNN_LOGE("pack_A_tile_fp32_to_int8 %d %d", max_ii, elempack);
 
@@ -2736,7 +2725,7 @@ static void pack_A_tile_fp32_to_int8(const Mat& A, Mat& AT, int i, int max_ii, i
 static void transpose_compute_A_tile_fp32_int8_scales(const Mat& A, Mat& scales, float B_scale, Mat& out_descales, int i, int max_ii)
 {
     const int elempack = A.elempack;
-    const int A_hstep = A.dims == 3 ? (int)A.cstep : A.w;
+    const size_t A_hstep = A.dims == 3 ? A.cstep : (size_t)A.w;
     const int K = A.dims == 3 ? A.c : A.h;
 
     // NCNN_LOGE("transpose_compute_A_tile_int8_scales %d %d", max_ii, elempack);
@@ -3043,7 +3032,7 @@ static void transpose_pack_A_tile_fp32_to_int8(const Mat& A, Mat& AT, int i, int
 #endif
 
     const int elempack = A.elempack;
-    const int A_hstep = A.dims == 3 ? (int)A.cstep : A.w;
+    const size_t A_hstep = A.dims == 3 ? A.cstep : (size_t)A.w;
 
     // NCNN_LOGE("transpose_pack_A_tile_fp32_to_int8 %d %d", max_ii, elempack);
 
@@ -3940,7 +3929,7 @@ static void compute_B_fp32_int8_scale(const Mat& B, float& scale)
 #endif
     for (int i = 0; i < (B.dims == 3 ? B.c : B.h); i++)
     {
-        const int B_hstep = B.dims == 3 ? (int)B.cstep : B.w;
+        const size_t B_hstep = B.dims == 3 ? B.cstep : (size_t)B.w;
         const float* ptr = (const float*)B + i * B_hstep * B.elempack;
 
         const int size = B.w * B.elempack;
@@ -3987,7 +3976,7 @@ static void pack_B_tile_fp32_to_int8(const Mat& B, Mat& BT, int j, int max_jj, i
 #endif
 
     const int elempack = B.elempack;
-    const int B_hstep = B.dims == 3 ? (int)B.cstep : B.w;
+    const size_t B_hstep = B.dims == 3 ? B.cstep : (size_t)B.w;
 
     // NCNN_LOGE("pack_B_tile_fp32_to_int8 %d %d %d", max_jj, max_kk, elempack);
 
@@ -4794,7 +4783,7 @@ static void transpose_pack_B_tile_fp32_to_int8(const Mat& B, Mat& BT, int j, int
 #endif
 
     const int elempack = B.elempack;
-    const int B_hstep = B.dims == 3 ? (int)B.cstep : B.w;
+    const size_t B_hstep = B.dims == 3 ? B.cstep : (size_t)B.w;
 
     // NCNN_LOGE("transpose_pack_B_tile_fp32_to_int8 %d %d", max_jj, elempack);
 
@@ -5630,9 +5619,9 @@ static void unpack_output_tile_int32_to_fp32(const Mat& topT, const Mat& C, Mat&
 #endif
 
     const int out_elempack = top_blob.elempack;
-    const int out_hstep = top_blob.dims == 3 ? (int)top_blob.cstep : top_blob.w;
+    const size_t out_hstep = top_blob.dims == 3 ? top_blob.cstep : (size_t)top_blob.w;
 
-    const int c_hstep = C.dims == 3 ? (int)C.cstep : C.w;
+    const size_t c_hstep = C.dims == 3 ? C.cstep : (size_t)C.w;
     const int c_elempack = C.elempack;
     const float* pC = C;
 
@@ -7710,9 +7699,9 @@ static void transpose_unpack_output_tile_int32_to_fp32(const Mat& topT, const Ma
 #endif
 
     const int out_elempack = top_blob.elempack;
-    const int out_hstep = top_blob.dims == 3 ? (int)top_blob.cstep : top_blob.w;
+    const size_t out_hstep = top_blob.dims == 3 ? top_blob.cstep : (size_t)top_blob.w;
 
-    const int c_hstep = C.dims == 3 ? (int)C.cstep : C.w;
+    const size_t c_hstep = C.dims == 3 ? C.cstep : (size_t)C.w;
     const int c_elempack = C.elempack;
     const float* pC = C;
 
@@ -10733,7 +10722,6 @@ static void gemm_transB_packed_tile_int8(const Mat& AT_tile, const Mat& BT_tile,
                 int16x8_t _sd = vmull_s8(vget_high_s8(_pA), vreinterpret_s8_s16(vdup_lane_s16(vreinterpret_s16_s8(vget_high_s8(_pB)), 1)));
                 int16x8_t _se = vmull_s8(vget_high_s8(_pA), vreinterpret_s8_s16(vdup_lane_s16(vreinterpret_s16_s8(vget_high_s8(_pB)), 2)));
                 int16x8_t _sf = vmull_s8(vget_high_s8(_pA), vreinterpret_s8_s16(vdup_lane_s16(vreinterpret_s16_s8(vget_high_s8(_pB)), 3)));
-
                 _sum0 = vpadalq_s16(_sum0, _s0);
                 _sum1 = vpadalq_s16(_sum1, _s1);
                 _sum2 = vpadalq_s16(_sum2, _s2);
@@ -10782,7 +10770,6 @@ static void gemm_transB_packed_tile_int8(const Mat& AT_tile, const Mat& BT_tile,
                 int16x8_t _sd = vmull_s8(vget_high_s8(_pA1), vget_high_s8(_pB1));
                 int16x8_t _se = vmull_s8(vget_high_s8(_pA1), vget_low_s8(_pB1));
                 int16x8_t _sf = vmull_s8(vget_low_s8(_pA1), vget_high_s8(_pB1));
-
                 _sum0 = vpadalq_s16(_sum0, _s0);
                 _sum1 = vpadalq_s16(_sum1, _s1);
                 _sum2 = vpadalq_s16(_sum2, _s2);
@@ -11497,7 +11484,6 @@ static void gemm_transB_packed_tile_int8(const Mat& AT_tile, const Mat& BT_tile,
                 int16x8_t _s5 = vmull_s8(vget_high_s8(_pA), vreinterpret_s8_s16(vdup_lane_s16(vreinterpret_s16_s8(_pB), 1)));
                 int16x8_t _s6 = vmull_s8(vget_high_s8(_pA), vreinterpret_s8_s16(vdup_lane_s16(vreinterpret_s16_s8(_pB), 2)));
                 int16x8_t _s7 = vmull_s8(vget_high_s8(_pA), vreinterpret_s8_s16(vdup_lane_s16(vreinterpret_s16_s8(_pB), 3)));
-
                 _sum0 = vpadalq_s16(_sum0, _s0);
                 _sum1 = vpadalq_s16(_sum1, _s1);
                 _sum2 = vpadalq_s16(_sum2, _s2);
@@ -14501,6 +14487,34 @@ static void gemm_transB_packed_tile_int8(const Mat& AT_tile, const Mat& BT_tile,
                 pB += 4;
             }
 #endif // __ARM_NEON
+            int sum00 = 0;
+            int sum01 = 0;
+            int sum02 = 0;
+            int sum03 = 0;
+            int sum10 = 0;
+            int sum11 = 0;
+            int sum12 = 0;
+            int sum13 = 0;
+            for (; kk + 3 < max_kk; kk += 4)
+            {
+                sum00 += pA[0] * pB[0];
+                sum10 += pA[0] * pB[1];
+                sum01 += pA[1] * pB[2];
+                sum11 += pA[1] * pB[3];
+                sum02 += pA[2] * pB[4];
+                sum12 += pA[2] * pB[5];
+                sum03 += pA[3] * pB[6];
+                sum13 += pA[3] * pB[7];
+
+                pA += 4;
+                pB += 8;
+            }
+            sum00 += sum01;
+            sum02 += sum03;
+            sum10 += sum11;
+            sum12 += sum13;
+            sum0 += sum00 + sum02;
+            sum1 += sum10 + sum12;
             for (; kk < max_kk; kk += 1)
             {
                 sum0 += pA[0] * pB[0];
@@ -14590,6 +14604,23 @@ static void gemm_transB_packed_tile_int8(const Mat& AT_tile, const Mat& BT_tile,
             sum += vget_lane_s32(_ss, 0);
 #endif
 #endif // __ARM_NEON
+            int sum0 = 0;
+            int sum1 = 0;
+            int sum2 = 0;
+            int sum3 = 0;
+            for (; kk + 3 < max_kk; kk += 4)
+            {
+                sum0 += pA[0] * pB[0];
+                sum1 += pA[1] * pB[1];
+                sum2 += pA[2] * pB[2];
+                sum3 += pA[3] * pB[3];
+
+                pA += 4;
+                pB += 4;
+            }
+            sum0 += sum1;
+            sum2 += sum3;
+            sum += sum0 + sum2;
             for (; kk < max_kk; kk += 1)
             {
                 sum += pA[0] * pB[0];
