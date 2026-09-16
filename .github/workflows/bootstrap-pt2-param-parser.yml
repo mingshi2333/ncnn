@@ -1,0 +1,89 @@
+name: bootstrap-pt2-param-parser
+
+on:
+  push:
+    branches: [ci/pt2-param-parser-bootstrap-20260916]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply parser repair on the clean candidate parent
+        env:
+          BASE_SHA: 5d8324bde8b4ab86e7aedd16f12b58ac4f1f2ceb
+          TARGET_BRANCH: fix/pt2-param-parser-20260916
+        run: |
+          git checkout --detach "$BASE_SHA"
+          python - <<'PY'
+          from pathlib import Path
+
+          ir = Path('tools/pnnx/src/ir.cpp')
+          text = ir.read_text()
+          old = '''        // key=value
+          while (!iss.eof())
+          {
+              std::string param;
+              iss >> param;
+
+              std::string key;
+          '''
+          new = '''        // key=value
+          std::string param;
+          while (iss >> param)
+          {
+              std::string key;
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('unexpected Graph::parse parameter loop shape')
+          ir.write_text(text.replace(old, new, 1))
+
+          test = Path('tools/pnnx/tests/test_exported_program_parameter_roundtrip.cpp')
+          text = test.read_text()
+          marker = 'static int test_explicit_scalar_parse()\n'
+          regression = r'''static int test_trailing_parameter_whitespace()
+          {
+              const std::string param = "7767517\n"
+                                        "2 2\n"
+                                        "pnnx.Input input 0 1 x #x=(1)f32\n"
+                                        "prim::ListConstruct construct 1 1 x values    \n";
+
+              pnnx::Graph graph;
+              if (graph.parse(param) != 0 || graph.ops.size() != 2)
+              {
+                  fprintf(stderr, "failed to parse graph with trailing parameter whitespace\n");
+                  return 1;
+              }
+
+              const pnnx::Operator* construct = graph.ops[1];
+              if (!construct->params.empty())
+              {
+                  fprintf(stderr, "trailing parameter whitespace created %lu synthetic parameters\n", (unsigned long)construct->params.size());
+                  return 1;
+              }
+
+              return 0;
+          }
+
+          '''
+          if text.count(marker) != 1:
+              raise SystemExit('unexpected regression insertion point')
+          text = text.replace(marker, regression + marker, 1)
+          call = '    failures += test_explicit_scalar_parse();\n'
+          if text.count(call) != 1:
+              raise SystemExit('unexpected regression call insertion point')
+          text = text.replace(call, call + '    failures += test_trailing_parameter_whitespace();\n', 1)
+          test.write_text(text)
+          PY
+          git diff --check
+          git diff -- tools/pnnx/src/ir.cpp tools/pnnx/tests/test_exported_program_parameter_roundtrip.cpp
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tools/pnnx/src/ir.cpp tools/pnnx/tests/test_exported_program_parameter_roundtrip.cpp
+          git commit -m "pnnx ignore trailing whitespace while parsing parameters"
+          git push origin HEAD:"refs/heads/$TARGET_BRANCH"
