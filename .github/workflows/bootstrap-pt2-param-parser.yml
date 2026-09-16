@@ -41,9 +41,9 @@ jobs:
               '        {\n'
               '            std::string key;\n'
           )
-          if text.count(old) != 1:
-              raise SystemExit('unexpected Graph::parse parameter loop shape')
-          ir.write_text(text.replace(old, new, 1))
+          if text.count(old) != 2:
+              raise SystemExit('expected exactly two parameter-token loops, found %d' % text.count(old))
+          ir.write_text(text.replace(old, new))
 
           test = Path('tools/pnnx/tests/test_exported_program_parameter_roundtrip.cpp')
           text = test.read_text()
