@@ -1,0 +1,82 @@
+name: pt2-windows-smoke
+
+on:
+  push:
+    branches: [fix/pt2-f64-onnx-fp16-windows-ci-20260916]
+
+permissions:
+  contents: read
+
+env:
+  QUICK_TEST_TORCH_VERSION: 2.13.0
+  QUICK_TEST_TORCHVISION_VERSION: 0.28.0
+  PYTHONUSERBASE: ${{ github.workspace }}/torch
+  UseMultiToolTask: true
+
+jobs:
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install Torch producer
+        run: |
+          python -m pip config set global.break-system-packages true
+          python -m pip install --user torch==${{ env.QUICK_TEST_TORCH_VERSION }} torchvision==${{ env.QUICK_TEST_TORCHVISION_VERSION }} --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --user numpy packaging
+      - name: Add Torch DLL directory
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import torch
+          with open(os.environ['GITHUB_PATH'], 'a') as stream:
+              stream.write(str(Path(torch.__file__).resolve().parent / 'lib') + '\n')
+      - name: Build pnnx
+        run: |
+          cd tools/pnnx
+          mkdir build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          cmake --build . --config Release -j 4
+      - name: Build current CPU ncnn binding
+        env:
+          EXTRA_CMAKE_ARGS: -DNCNN_VULKAN=OFF
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
+        run: python -m pip install --user . --no-deps --verbose
+      - name: Helper regression executable
+        run: tools/pnnx/build/tests/Release/pnnx_test_exported_program_parameter_roundtrip.exe
+      - name: Exact failing frontend test first
+        env:
+          OMP_THREAD_LIMIT: 1
+          OMP_NUM_THREADS: 1
+          MKL_NUM_THREADS: 1
+        run: |
+          cd tools/pnnx/build
+          ctest -C Release --output-on-failure -R '^test_exported_program$'
+      - name: All required frontend path and native PT2 smoke tests
+        env:
+          OMP_THREAD_LIMIT: 1
+          OMP_NUM_THREADS: 1
+          MKL_NUM_THREADS: 1
+        run: |
+          cd tools/pnnx/build
+          ctest -C Release --output-on-failure --output-junit windows-pt2-smoke.xml -L '^pt2_(frontend|ncnn)$'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-pt2-smoke
+          path: |
+            tools/pnnx/build/windows-pt2-smoke.xml
+            tools/pnnx/build/Testing/Temporary/**
+            tools/pnnx/build/**/*.pnnx.param
+            tools/pnnx/build/**/*.ncnn.param
+            tools/pnnx/build/**/*_pnnx.py
+            tools/pnnx/build/**/*_ncnn.py
+          retention-days: 7
