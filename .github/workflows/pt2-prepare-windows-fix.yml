@@ -5,7 +5,7 @@ on:
     branches: [ci/pt2-python-paths-20260916]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pt2-prepare-windows-fix
@@ -15,29 +15,65 @@ jobs:
   prepare-repair:
     if: github.repository == 'mingshi2333/ncnn' && github.ref == 'refs/heads/ci/pt2-python-paths-20260916'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: a673a357dfe8713e04c0a7803b4612f5ed24a257
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: 5d8324bde8b4ab86e7aedd16f12b58ac4f1f2ceb
+          path: clean
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python -m pip install PyYAML
-      - name: Reproduce, repair, regress and publish only the new clean fork branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python .github/scripts/prepare_pt2_windows_fix.py
-      - name: Preserve exact repair and validation provenance
-        if: always()
+      - run: git -C clean fetch --depth=1 origin 160ba100bad3a29df2961d6adfba84362b7949db
+      - name: Reuse the reviewed CI transformation without rerunning code writes
+        run: |
+          python - <<'PY'
+          import ast, hashlib, json, runpy, tarfile
+          from pathlib import Path
+          import yaml
+          script = Path('.github/scripts/prepare_pt2_windows_fix.py')
+          scope = runpy.run_path(str(script))
+          root = Path('clean').resolve()
+          fix = '5d8324bde8b4ab86e7aedd16f12b58ac4f1f2ceb'
+          assert scope['command']('git', 'rev-parse', 'HEAD', cwd=root) == fix
+          main = next(node for node in ast.parse(script.read_text()).body
+                      if isinstance(node, ast.FunctionDef) and node.name == 'main')
+          stages = [node for node in main.body if isinstance(node, ast.For)
+                    and isinstance(node.iter, ast.Name) and node.iter.id == 'CI_FILES']
+          assert len(stages) == 2
+          scope.update(root=root, fix=fix)
+          # Only reconstruct the two fork CI files. No publish/API code executes.
+          exec(compile(ast.Module(body=[stages[0]], type_ignores=[]), str(script), 'exec'), scope)
+          workflow = yaml.safe_load((root / scope['CI_FILES'][1]).read_text())
+          assert workflow['jobs']['windows-test']['runs-on'] == 'windows-latest'
+          assert len(workflow['jobs']['quick-test']['strategy']['matrix']['os']) == 2
+          assert 'windows-test' in workflow['jobs']['build']['needs']
+          assert 'windows-test' in workflow['jobs']['all-green']['needs']
+          entries = []
+          for path in scope['CI_FILES']:
+              data = (root / path).read_bytes()
+              sha = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+              entries.append(dict(path=path, mode='100644', type='blob', sha=sha))
+          result = dict(base=scope['BASE'], candidate=fix, code_files=scope['CODE_FILES'],
+                        base_tree=scope['command']('git', 'rev-parse', fix + '^{tree}', cwd=root),
+                        tree=entries, validation_branch=scope['CI_BRANCH'])
+          Path('repair-provenance.json').write_text(json.dumps(result, indent=2) + '\n')
+          with tarfile.open('reviewed-source.tar', 'w') as archive:
+              for path in scope['CODE_FILES'] + scope['CI_FILES']:
+                  archive.add(root / path, arcname=path)
+          print(json.dumps(result, indent=2))
+          PY
+      - name: Preserve exact code and validation files for connector publication
         uses: actions/upload-artifact@v7
         with:
           name: pt2-python-path-repair
           path: |
             repair-provenance.json
-            repair.patch
             reviewed-source.tar
-            regression-before.log
-            regression-after.log
           retention-days: 7
