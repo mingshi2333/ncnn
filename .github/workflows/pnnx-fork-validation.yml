@@ -1,0 +1,300 @@
+name: pnnx-fork-validation
+
+on:
+  pull_request:
+    branches: [pnnx-exported-program]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pnnx-fork-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  VALIDATION_SHA: ${{ github.event.pull_request.head.sha }}
+  PROMOTION_CANDIDATE: 3f9e5da0e3d76406394797cf75ae622fd1dc4088
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  EXTRA_CMAKE_ARGS: -DNCNN_VULKAN=OFF
+
+jobs:
+  prepare:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.metadata.outputs.matrix }}
+      env: ${{ steps.metadata.outputs.env }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VALIDATION_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML
+      - id: metadata
+        run: python .github/scripts/pnnx_fork_ci.py metadata
+      - name: Check patch syntax and shell failure propagation
+        run: |
+          python -m py_compile tools/pnnx/tests/pnnx_test_utils.py tools/pnnx/tests/test_pnnx_test_utils.py tools/pnnx/tests/ncnn/test_attribute.py .github/scripts/pnnx_fork_ci.py
+          python .github/scripts/pnnx_fork_ci.py self-test
+
+  build:
+    needs: [prepare, windows-test, quick-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env: ${{ fromJSON(needs.prepare.outputs.env) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VALIDATION_SHA }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: pnnx/pnnx
+          path: pnnx-patches
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install PyYAML
+          sudo apt-get update
+          sudo apt-get install -y ninja-build zlib1g-dev
+      - name: Build upstream dependencies and converter from this checkout
+        run: python .github/scripts/pnnx_fork_ci.py run build libtorch torchvision onnxruntime pnnx
+      - name: Package fresh build kit
+        run: |
+          git -C pnnx-patches rev-parse HEAD
+          sha256sum tools/pnnx/build/src/pnnx
+          printf '%s\n' "$VALIDATION_SHA" > fork-build-sha.txt
+          tar -czf fork-pnnx-build-kit.tgz libtorch-*-install torchvision-*-install onnxruntime-*-install tools/pnnx/build/src/pnnx fork-build-sha.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-pnnx-build-kit
+          path: fork-pnnx-build-kit.tgz
+          retention-days: 7
+          compression-level: 0
+
+  windows-test:
+    name: quick-test (windows-latest)
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env: ${{ fromJSON(needs.prepare.outputs.env) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VALIDATION_SHA }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML
+      - name: Verify native shell quoting and early-failure propagation
+        run: python .github/scripts/pnnx_fork_ci.py self-test
+      - name: Install upstream quick-test producer
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test setup-pytorch
+      - name: Add Torch DLL directory on Windows
+        if: runner.os == 'Windows'
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import torch
+          with open(os.environ['GITHUB_PATH'], 'a') as stream:
+              stream.write(str(Path(torch.__file__).parent / 'lib') + '\n')
+      - name: Build this checkout and its CPU ncnn binding
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test build-pnnx build-ncnn-python
+      - name: Helper regressions
+        run: python tools/pnnx/tests/test_pnnx_test_utils.py -v
+      - name: Original quick convolution tests
+        if: runner.os != 'Windows'
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test quick-test
+      - name: Required 13 frontend/path/native PT2 tests
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test exported-program-test
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: fork-quick-windows-latest
+          path: |
+            fork-ci-reports/**
+            tools/pnnx/build/Testing/Temporary/**
+            tools/pnnx/build/**/*.pnnx.param
+            tools/pnnx/build/**/*.ncnn.param
+            tools/pnnx/build/**/*_pnnx.py
+            tools/pnnx/build/**/*_ncnn.py
+          retention-days: 7
+
+  quick-test:
+    needs: [prepare, windows-test]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env: ${{ fromJSON(needs.prepare.outputs.env) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VALIDATION_SHA }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML
+      - name: Verify native shell quoting and early-failure propagation
+        run: python .github/scripts/pnnx_fork_ci.py self-test
+      - name: Install upstream quick-test producer
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test setup-pytorch
+      - name: Add Torch DLL directory on Windows
+        if: runner.os == 'Windows'
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import torch
+          with open(os.environ['GITHUB_PATH'], 'a') as stream:
+              stream.write(str(Path(torch.__file__).parent / 'lib') + '\n')
+      - name: Build this checkout and its CPU ncnn binding
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test build-pnnx build-ncnn-python
+      - name: Helper regressions
+        run: python tools/pnnx/tests/test_pnnx_test_utils.py -v
+      - name: Original quick convolution tests
+        if: runner.os != 'Windows'
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test quick-test
+      - name: Required 13 frontend/path/native PT2 tests
+        run: python .github/scripts/pnnx_fork_ci.py run quick-test exported-program-test
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: fork-quick-${{ matrix.os }}
+          path: |
+            fork-ci-reports/**
+            tools/pnnx/build/Testing/Temporary/**
+            tools/pnnx/build/**/*.pnnx.param
+            tools/pnnx/build/**/*.ncnn.param
+            tools/pnnx/build/**/*_pnnx.py
+            tools/pnnx/build/**/*_ncnn.py
+          retention-days: 7
+
+  test:
+    needs: [prepare, build]
+    name: full-test-${{ matrix.torch }}-py${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      MATRIX_JSON: ${{ toJSON(matrix) }}
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VALIDATION_SHA }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install PyYAML
+      - uses: actions/download-artifact@v8
+        with:
+          name: fork-pnnx-build-kit
+      - name: Unpack and verify build provenance
+        shell: bash
+        run: |
+          tar -xzf fork-pnnx-build-kit.tgz
+          test "$(cat fork-build-sha.txt)" = "$VALIDATION_SHA"
+          sha256sum tools/pnnx/build/src/pnnx
+          mv tools/pnnx/build/src/pnnx fork-pnnx
+          rm -r tools/pnnx/build
+      - name: Install complete upstream matrix dependencies
+        run: python .github/scripts/pnnx_fork_ci.py run test setup-pytorch
+      - name: Old Torch executable-stack compatibility
+        if: matrix.python == '3.8' || matrix.python == '3.9'
+        run: python .github/scripts/pnnx_fork_ci.py run test setup-pytorch-execstack-or-patchelf
+      - name: Build current native binding and configure all tests
+        run: python .github/scripts/pnnx_fork_ci.py run test python-ncnn pnnx
+      - name: Install freshly built converter
+        shell: bash
+        run: |
+          cp fork-pnnx tools/pnnx/build/src/pnnx
+          chmod +x tools/pnnx/build/src/pnnx
+      - name: Complete existing non-PT2 CTest suite
+        run: python .github/scripts/pnnx_fork_ci.py run test test
+      - name: Complete PT2 suite for every supported matrix producer
+        if: contains(fromJSON('["2.9.0","2.10.0","2.11.0","2.12.1"]'), matrix.torch)
+        run: python .github/scripts/pnnx_fork_ci.py run test exported-program-test
+      - name: Python pnnx packaging tests
+        run: python .github/scripts/pnnx_fork_ci.py run test python-pnnx
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: fork-full-${{ matrix.torch }}
+          path: |
+            fork-ci-reports/**
+            tools/pnnx/build/Testing/Temporary/**
+            tools/pnnx/build/**/*.pnnx.param
+            tools/pnnx/build/**/*.ncnn.param
+            tools/pnnx/build/**/*_pnnx.py
+            tools/pnnx/build/**/*_ncnn.py
+          retention-days: 7
+
+  codeql:
+    needs: [prepare, windows-test, quick-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env: ${{ fromJSON(needs.prepare.outputs.env) }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VALIDATION_SHA }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML
+      - run: python .github/scripts/pnnx_fork_ci.py run quick-test setup-pytorch
+      - uses: github/codeql-action/init@v4
+        with:
+          # A global build-mode is supported only for a single language.
+          # Keep C++ extraction from the explicit build and Python extraction.
+          languages: cpp,python
+      - run: python .github/scripts/pnnx_fork_ci.py run quick-test build-pnnx
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /fork-pt2-validation
+
+  all-green:
+    if: always()
+    needs: [prepare, build, windows-test, quick-test, test, codeql]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every matrix and analysis job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          bad = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          if bad:
+              raise SystemExit('Promotion blocked: ' + repr(bad))
+          print('All 19 matrix jobs, 3 native platforms, build, syntax and CodeQL passed.')
+          print('Validated commit:', os.environ['VALIDATION_SHA'])
+          print('Promotion candidate:', os.environ['PROMOTION_CANDIDATE'])
+          print('Validation only: this workflow never updates or merges an upstream PR.')
+          PY
