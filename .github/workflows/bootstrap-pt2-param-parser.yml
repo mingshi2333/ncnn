@@ -25,20 +25,22 @@ jobs:
 
           ir = Path('tools/pnnx/src/ir.cpp')
           text = ir.read_text()
-          old = '''        // key=value
-          while (!iss.eof())
-          {
-              std::string param;
-              iss >> param;
-
-              std::string key;
-          '''
-          new = '''        // key=value
-          std::string param;
-          while (iss >> param)
-          {
-              std::string key;
-          '''
+          old = (
+              '        // key=value\n'
+              '        while (!iss.eof())\n'
+              '        {\n'
+              '            std::string param;\n'
+              '            iss >> param;\n'
+              '\n'
+              '            std::string key;\n'
+          )
+          new = (
+              '        // key=value\n'
+              '        std::string param;\n'
+              '        while (iss >> param)\n'
+              '        {\n'
+              '            std::string key;\n'
+          )
           if text.count(old) != 1:
               raise SystemExit('unexpected Graph::parse parameter loop shape')
           ir.write_text(text.replace(old, new, 1))
