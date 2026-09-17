@@ -1,0 +1,93 @@
+name: pt2-funnel-strict-diagnostic
+
+on:
+  push:
+    branches: [validation/pt2-funnel-strict-diagnostic-20260917]
+    paths:
+      - '.github/workflows/pt2-funnel-strict-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  torch-2-9-funnel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PYTHONUSERBASE: ${{ github.workspace }}/python-3.13
+      OMP_THREAD_LIMIT: 1
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install Torch 2.9 producer and Funnel dependency
+        run: |
+          python -m pip config set global.break-system-packages true
+          pip install --user numpy==2.2.5 packaging
+          pip install --user torch==2.9.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip install --user transformers==4.56.2
+      - name: Build pnnx from clean candidate plus diagnostic workflow only
+        run: |
+          cd tools/pnnx
+          mkdir build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          cmake --build . --config Release -j 2
+      - name: Compare non-strict and strict Funnel export, then require existing frontend expectation
+        shell: bash
+        run: |
+          export PATH="$PYTHONUSERBASE/bin:$PATH"
+          export PYTHONPATH="$GITHUB_WORKSPACE/tools/pnnx/tests"
+          export PNNX_TEST_FORMAT=pt2
+          export PNNX_TEST_PNNX="$GITHUB_WORKSPACE/tools/pnnx/build/src/pnnx"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import tempfile
+          import torch
+
+          from test_transformers_funnel_attention import Model
+          from pnnx_test_utils import convert_and_import
+
+          print('torch', torch.__version__)
+          torch.manual_seed(0)
+          net = Model().eval()
+          x = torch.rand(3, 16, 192)
+          mask0 = torch.rand(3, 16)
+
+          try:
+              torch.export.export(net, (x, mask0), strict=False)
+          except Exception as exc:
+              print('strict=False:', type(exc).__name__, str(exc).splitlines()[0])
+          else:
+              print('strict=False: success')
+
+          strict_ep = torch.export.export(net, (x, mask0), strict=True)
+          print('strict=True: success')
+          with tempfile.TemporaryDirectory() as directory:
+              archive = Path(directory) / 'strict.pt2'
+              torch.export.save(strict_ep, archive)
+              print('strict=True save:', archive.stat().st_size)
+
+              output_basename = str(Path(directory) / 'funnel_strict')
+              try:
+                  convert_and_import(
+                      net,
+                      (x, mask0),
+                      'test_transformers_funnel_attention',
+                      pnnx_args=('inputshape=[3,16,192],[3,16]',),
+                      export_kwargs={'strict': True},
+                      output_basename=output_basename,
+                  )
+              except SystemExit as exc:
+                  if exc.code != 77:
+                      raise
+                  print('strict=True reached the existing declared PT2 frontend unsupported boundary')
+              else:
+                  raise AssertionError('Funnel unexpectedly passed instead of matching its existing PT2 expectation')
+          PY
