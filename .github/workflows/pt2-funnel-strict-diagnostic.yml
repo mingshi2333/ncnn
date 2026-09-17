@@ -38,7 +38,7 @@ jobs:
           cd build
           cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build . --config Release -j 2
-      - name: Compare non-strict and strict Funnel export, then require existing frontend expectation
+      - name: Diagnose deferred runtime assertions for Torch 2.9 Funnel export
         shell: bash
         run: |
           export PATH="$PYTHONUSERBASE/bin:$PATH"
@@ -46,7 +46,6 @@ jobs:
           export PNNX_TEST_FORMAT=pt2
           export PNNX_TEST_PNNX="$GITHUB_WORKSPACE/tools/pnnx/build/src/pnnx"
           python - <<'PY'
-          import os
           from pathlib import Path
           import tempfile
           import torch
@@ -63,31 +62,40 @@ jobs:
           try:
               torch.export.export(net, (x, mask0), strict=False)
           except Exception as exc:
-              print('strict=False:', type(exc).__name__, str(exc).splitlines()[0])
+              print('default strict=False:', type(exc).__name__, str(exc).splitlines()[0])
+              if type(exc).__name__ != 'GuardOnDataDependentSymNode':
+                  raise AssertionError(f'unexpected default export failure: {type(exc).__name__}') from exc
+              if 'data-dependent expression' not in str(exc):
+                  raise AssertionError('default export failure did not contain the expected data-dependent guard') from exc
           else:
-              print('strict=False: success')
+              raise AssertionError('default Torch 2.9 Funnel export unexpectedly succeeded')
 
-          strict_ep = torch.export.export(net, (x, mask0), strict=True)
-          print('strict=True: success')
+          deferred_kwargs = {
+              'strict': False,
+              'prefer_deferred_runtime_asserts_over_guards': True,
+          }
+          deferred_ep = torch.export.export(net, (x, mask0), **deferred_kwargs)
+          print('deferred runtime assertions export: success')
+
           with tempfile.TemporaryDirectory() as directory:
-              archive = Path(directory) / 'strict.pt2'
-              torch.export.save(strict_ep, archive)
-              print('strict=True save:', archive.stat().st_size)
+              archive = Path(directory) / 'deferred.pt2'
+              torch.export.save(deferred_ep, archive)
+              print('deferred runtime assertions save:', archive.stat().st_size)
 
-              output_basename = str(Path(directory) / 'funnel_strict')
+              output_basename = str(Path(directory) / 'funnel_deferred')
               try:
                   convert_and_import(
                       net,
                       (x, mask0),
                       'test_transformers_funnel_attention',
                       pnnx_args=('inputshape=[3,16,192],[3,16]',),
-                      export_kwargs={'strict': True},
+                      export_kwargs=deferred_kwargs,
                       output_basename=output_basename,
                   )
               except SystemExit as exc:
                   if exc.code != 77:
                       raise
-                  print('strict=True reached the existing declared PT2 frontend unsupported boundary')
+                  print('deferred export reached the existing declared PT2 frontend unsupported boundary')
               else:
                   raise AssertionError('Funnel unexpectedly passed instead of matching its existing PT2 expectation')
           PY
