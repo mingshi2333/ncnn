@@ -11,8 +11,9 @@ on:
     - 'toolchains/**'
     - 'glslang'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/test-coverage.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -28,11 +29,14 @@ permissions:
 
 jobs:
   linux-gcc-gpu-t4:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: [self-hosted, linux, t4]
     steps:
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: build
       env:
         CC: gcc
@@ -45,7 +49,7 @@ jobs:
     - name: test
       env:
         LD_LIBRARY_PATH: /data/action/install/lib64
-      run: cd build && ctest --output-on-failure -j 4
+      run: cd build && ctest --no-tests=error --output-on-failure -j 4
     - name: lcov-collect
       run: |
         cd build
@@ -56,17 +60,19 @@ jobs:
         lcov --list lcov.info
 
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/.local/bin/codecov
-        files: build/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gcc-x64:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: x64-${{ matrix.name }}
-    runs-on: [self-hosted, linux, ubuntu25]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +84,20 @@ jobs:
           - { name: 'avx512',     SSE2: ON,  AVX: ON,  F16C: ON,  FMA: ON,  AVX2: ON,  AVX512: ON,  AVX512VNNI: OFF }
           - { name: 'avx512vnni', SSE2: ON,  AVX: ON,  F16C: ON,  FMA: ON,  AVX2: ON,  AVX512: ON,  AVX512VNNI: ON  }
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      env:
+        FORK_MATRIX_NAME: ${{ matrix.name }}
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
     - name: build
       run: |
         mkdir build && cd build
@@ -96,11 +115,11 @@ jobs:
             -DNCNN_AVX512BF16=OFF \
             -DNCNN_AVX512FP16=OFF \
             -DNCNN_OPENMP=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test
       run: |
         cd build
-        ctest --output-on-failure -j 8
+        ctest --no-tests=error --output-on-failure -j 2
     - name: lcov-collect
       run: |
         cd build
@@ -125,13 +144,13 @@ jobs:
             -DNCNN_AVX512BF16=OFF \
             -DNCNN_AVX512FP16=OFF \
             -DNCNN_OPENMP=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test
       run: |
         export OMP_THREAD_LIMIT=1
         export OMP_NUM_THREADS=1
         cd build-openmp
-        ctest --output-on-failure -j 8
+        ctest --no-tests=error --output-on-failure -j 2
     - name: lcov-collect
       run: |
         cd build-openmp
@@ -140,30 +159,43 @@ jobs:
         lcov --ignore-errors inconsistent -r lcov.info '*/build-openmp/*' -o lcov.info
         lcov --ignore-errors inconsistent --list lcov.info
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/osd/codecov
-        files: build/lcov.info,build-openmp/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gcc-x64-simplestl-simplemath:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: simplestl-simplemath
-    runs-on: [self-hosted, linux, ubuntu25]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
     - name: build
       run: |
         mkdir build && cd build
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host-c.gcc.toolchain.cmake \
             -DCMAKE_BUILD_TYPE=debug -DNCNN_COVERAGE=ON -DNCNN_SIMPLESTL=ON -DNCNN_SIMPLEMATH=ON \
             -DNCNN_OPENMP=OFF -DNCNN_THREADS=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test
       run: |
         cd build
-        ctest --output-on-failure -j 8
+        ctest --no-tests=error --output-on-failure -j 2
     - name: lcov-collect
       run: |
         cd build
@@ -172,17 +204,20 @@ jobs:
         lcov --ignore-errors inconsistent -r lcov.info '*/build/*' -o lcov.info
         lcov --ignore-errors inconsistent --list lcov.info
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/osd/codecov
-        files: build/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gcc-x64-sde:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: sde-${{ matrix.cpu }}
-    runs-on: [self-hosted, linux, ubuntu25]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
     env:
       SDE_PATH: /data/action/osd/sde-external-10.13.1-2026-07-28-lin
     strategy:
@@ -194,7 +229,18 @@ jobs:
           - { cpu: arl, AVX2: ON, AVXVNNI: ON,  AVXVNNIINT8: ON,  AVXNECONVERT: ON,  AVX512: OFF, AVX512VNNI: OFF, AVX512BF16: OFF, AVX512FP16: OFF }
           - { cpu: spr, AVX2: ON, AVXVNNI: OFF, AVXVNNIINT8: OFF, AVXNECONVERT: OFF, AVX512: ON,  AVX512VNNI: ON,  AVX512BF16: ON,  AVX512FP16: ON  }
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
     - name: build
       run: |
         mkdir build && cd build
@@ -212,11 +258,11 @@ jobs:
             -DNCNN_AVX512BF16=${{ matrix.AVX512BF16 }} \
             -DNCNN_AVX512FP16=${{ matrix.AVX512FP16 }} \
             -DNCNN_OPENMP=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-${{ matrix.cpu }};--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-${{ matrix.cpu }};--" ctest --no-tests=error --output-on-failure -j 2
     - name: lcov-collect
       run: |
         cd build
@@ -225,62 +271,76 @@ jobs:
         lcov --ignore-errors inconsistent -r lcov.info '*/build/*' -o lcov.info
         lcov --ignore-errors inconsistent --list lcov.info
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/osd/codecov
-        files: build/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gcc-x64-sde-combined:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: sde-combined
-    runs-on: [self-hosted, linux, ubuntu25]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
     env:
       SDE_PATH: /data/action/osd/sde-external-10.13.1-2026-07-28-lin
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
     - name: build
       run: |
         mkdir build && cd build
         cmake -DCMAKE_BUILD_TYPE=debug -DNCNN_COVERAGE=ON -DNCNN_OPENMP=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test-p4p
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-p4p;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-p4p;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-snb
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-snb;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-snb;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-hsw
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-hsw;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-hsw;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-adl
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-adl;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-adl;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-arl
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-arl;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-arl;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-skx
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-skx;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-skx;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-spr
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-spr;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-spr;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-gnr
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-gnr;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-gnr;--" ctest --no-tests=error --output-on-failure -j 2
     - name: test-dmr
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-dmr;--" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-dmr;--" ctest --no-tests=error --output-on-failure -j 2
     - name: lcov-collect
       run: |
         cd build
@@ -289,21 +349,35 @@ jobs:
         lcov --ignore-errors inconsistent -r lcov.info '*/build/*' -o lcov.info
         lcov --ignore-errors inconsistent --list lcov.info
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/osd/codecov
-        files: build/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gcc-riscv64-rvv:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     strategy:
+      fail-fast: false
       matrix:
         openmp: [ON, OFF]
-    runs-on: [self-hosted, linux, ubuntu]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
     # https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2026.05.19/riscv64-glibc-ubuntu-22.04-llvm.tar.xz
     - name: build
       run: |
@@ -311,19 +385,19 @@ jobs:
         mkdir build
         cd build
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/riscv64-unknown-linux-gnu.toolchain.cmake -DCMAKE_BUILD_TYPE=debug -DNCNN_COVERAGE=ON -DNCNN_RUNTIME_CPU=OFF -DNCNN_RVV=ON -DNCNN_ZFH=ON -DNCNN_ZVFH=ON -DNCNN_OPENMP=${{ matrix.openmp }} -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: test-vlen256
       run: |
         export PATH=/data/action/osd/qemu-install/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=256,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=256,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --no-tests=error --output-on-failure -j 2
 
     - name: test-vlen128
       run: |
         export PATH=/data/action/osd/qemu-install/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=128,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=128,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --no-tests=error --output-on-failure -j 2
 
     - name: lcov-collect
       run: |
@@ -335,28 +409,41 @@ jobs:
         lcov --list lcov.info
 
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        files: build/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gpu-llvmpipe:
-    runs-on: [self-hosted, linux, ubuntu25]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
     - name: build
       run: |
         mkdir build && cd build
         cmake -DCMAKE_BUILD_TYPE=debug -DNCNN_COVERAGE=ON -DNCNN_RUNTIME_CPU=OFF -DNCNN_AVX2=ON -DNCNN_AVXVNNI=OFF -DNCNN_AVXNECONVERT=OFF -DNCNN_AVX512=ON -DNCNN_AVX512VNNI=ON -DNCNN_AVX512BF16=OFF -DNCNN_AVX512FP16=OFF -DNCNN_XOP=OFF -DNCNN_FMA4=OFF -DNCNN_OPENMP=OFF -DNCNN_VULKAN=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test
       run: |
         export LP_NUM_THREADS=4
-        cd build && ctest --output-on-failure -j 8
+        cd build && ctest --no-tests=error --output-on-failure -j 2
     - name: lcov-collect
       run: |
         cd build
@@ -366,20 +453,32 @@ jobs:
         lcov --ignore-errors inconsistent --list lcov.info
 
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/osd/codecov
-        files: build/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gpu-swiftshader:
-    runs-on: [self-hosted, linux, ubuntu25]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
 
     - name: cache-swiftshader
       id: cache-swiftshader
@@ -401,7 +500,7 @@ jobs:
         git -c submodule."third_party/git-hooks".update=none submodule update --init --recursive
         mkdir -p build; cd build
         cmake -DCMAKE_INSTALL_PREFIX=install -DSWIFTSHADER_BUILD_PVR=FALSE -DSWIFTSHADER_BUILD_TESTS=FALSE -DSWIFTSHADER_ENABLE_ASTC=FALSE -DSWIFTSHADER_WARNINGS_AS_ERRORS=FALSE -DREACTOR_BACKEND=Subzero -DREACTOR_DEFAULT_OPT_LEVEL=Default -DCMAKE_BUILD_TYPE=Release ..
-        cmake --build . -j 8
+        cmake --build . -j 2
         mkdir $GITHUB_WORKSPACE/swiftshader-install
         cp Linux/* $GITHUB_WORKSPACE/swiftshader-install
 
@@ -409,12 +508,12 @@ jobs:
       run: |
         mkdir build && cd build
         cmake -DCMAKE_BUILD_TYPE=debug -DNCNN_COVERAGE=ON -DNCNN_RUNTIME_CPU=OFF -DNCNN_AVX2=ON -DNCNN_AVXVNNI=OFF -DNCNN_AVXNECONVERT=OFF -DNCNN_AVX512=ON -DNCNN_AVX512VNNI=ON -DNCNN_AVX512BF16=OFF -DNCNN_AVX512FP16=OFF -DNCNN_XOP=OFF -DNCNN_FMA4=OFF -DNCNN_OPENMP=OFF -DNCNN_VULKAN=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test
       run: |
         printf "[Processor]\nThreadCount=1\n" > build/tests/SwiftShader.ini
         export VK_ICD_FILENAMES="$GITHUB_WORKSPACE/swiftshader-install/vk_swiftshader_icd.json"
-        cd build && ctest --output-on-failure -j 8
+        cd build && ctest --no-tests=error --output-on-failure -j 2
     - name: lcov-collect
       run: |
         cd build
@@ -424,17 +523,19 @@ jobs:
         lcov --ignore-errors inconsistent --list lcov.info
 
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/osd/codecov
-        files: build/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7
 
   linux-gcc-cross:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: ${{ matrix.arch }}
-    runs-on: [self-hosted, linux, ubuntu25]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     strategy:
       fail-fast: false
       matrix:
@@ -536,7 +637,20 @@ jobs:
             qemu-args: "-L;/usr/loongarch64-linux-gnu"
 
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      env:
+        FORK_MATRIX_ARCH: ${{ matrix.arch }}
+      run: bash .github/scripts/ncnn_fork_setup.sh coverage
 
     - name: build
       run: |
@@ -544,12 +658,12 @@ jobs:
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/${{ matrix.toolchain }} ${{ matrix.extra-cmake-args }} -DNCNN_OPENMP=OFF \
             -DCMAKE_BUILD_TYPE=debug -DNCNN_COVERAGE=ON -DNCNN_RUNTIME_CPU=OFF \
             -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: test
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=${{ matrix.qemu }} TESTS_EXECUTABLE_LOADER_ARGUMENTS="${{ matrix.qemu-args }}" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=${{ matrix.qemu }} TESTS_EXECUTABLE_LOADER_ARGUMENTS="${{ matrix.qemu-args }}" ctest --no-tests=error --output-on-failure -j 2
 
     - name: lcov-collect
       run: |
@@ -565,14 +679,14 @@ jobs:
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/${{ matrix.toolchain }} ${{ matrix.extra-cmake-args }} -DNCNN_OPENMP=ON \
             -DCMAKE_BUILD_TYPE=debug -DNCNN_COVERAGE=ON -DNCNN_RUNTIME_CPU=OFF \
             -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: test-openmp
       run: |
         export OMP_THREAD_LIMIT=1
         export OMP_NUM_THREADS=1
         cd build-openmp
-        TESTS_EXECUTABLE_LOADER=${{ matrix.qemu }} TESTS_EXECUTABLE_LOADER_ARGUMENTS="${{ matrix.qemu-args }}" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=${{ matrix.qemu }} TESTS_EXECUTABLE_LOADER_ARGUMENTS="${{ matrix.qemu-args }}" ctest --no-tests=error --output-on-failure -j 2
 
     - name: lcov-collect-openmp
       run: |
@@ -583,10 +697,9 @@ jobs:
         lcov --ignore-errors inconsistent --list lcov.info
 
     - name: codecov
-      uses: codecov/codecov-action@v6
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        disable_search: true
-        plugins: noop
-        binary: /data/action/osd/codecov
-        files: build/lcov.info,build-openmp/lcov.info
+        name: coverage-${{ github.job }}-${{ strategy.job-index }}
+        path: build*/lcov.info
+        if-no-files-found: error
+        retention-days: 7

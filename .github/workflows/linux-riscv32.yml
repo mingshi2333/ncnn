@@ -12,8 +12,9 @@ on:
     - 'src/layer/riscv/**'
     - 'tests/**'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-riscv32.yml'
     - 'toolchains/c907-rv32-v310.toolchain.cmake'
     - 'CMakeLists.txt'
@@ -30,8 +31,11 @@ permissions:
 
 jobs:
   xuantie:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: xuantie-${{ matrix.cpu }}
-    runs-on: [self-hosted, linux, ubuntu]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +43,23 @@ jobs:
           - { cpu: c907-rv32, QEMU_CPU: c907fdv-rv32,   OPENMP: ON,  RVV: ON,  XTHEADVECTOR: OFF, ZFH: ON, ZVFH: ON  }
 
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      env:
+        XUANTIE_GCC_URL: ${{ vars.XUANTIE_GCC_URL }}
+        XUANTIE_GCC_SHA256: ${{ vars.XUANTIE_GCC_SHA256 }}
+        XUANTIE_QEMU_URL: ${{ vars.XUANTIE_QEMU_URL }}
+        XUANTIE_QEMU_SHA256: ${{ vars.XUANTIE_QEMU_SHA256 }}
+      run: bash .github/scripts/ncnn_fork_setup.sh xuantie
 
     - name: build
       run: |
@@ -53,10 +73,10 @@ jobs:
             -DNCNN_ZFH=${{ matrix.ZFH }} \
             -DNCNN_ZVFH=${{ matrix.ZVFH }} \
             -DNCNN_SIMPLEOCV=ON -DNCNN_BUILD_EXAMPLES=ON -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: test
       run: |
         export PATH=/data/action/osd/xuantie-qemu-x86_64-Ubuntu-20.04-V5.4.1/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv32 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }}" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv32 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }}" ctest --no-tests=error --output-on-failure -j 2

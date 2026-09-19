@@ -296,6 +296,7 @@ jobs:
           if bad:
               raise SystemExit('Promotion blocked: ' + repr(bad))
           print('All 19 matrix jobs, 3 native platforms, build, syntax and CodeQL passed.')
+          print('This is the pnnx subset only; full ncnn platform checks and environment gaps still block promotion.')
           print('Validated commit:', os.environ['VALIDATION_SHA'])
           print('Promotion candidate:', os.environ['PROMOTION_CANDIDATE'])
           print('Validation only: this workflow never updates or merges an upstream PR.')

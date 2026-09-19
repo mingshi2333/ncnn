@@ -9,8 +9,9 @@ on:
       - 'src/*'
       - 'src/layer/*'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+      - '.github/scripts/ncnn_fork_ci.py'
       - '.github/workflows/esp32.yml'
       - 'CMakeLists.txt'
       - 'cmake/**'
@@ -26,44 +27,47 @@ permissions:
 
 jobs:
   build:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: ESP32
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.8'
+    - name: Setup Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.8'
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build ccache
-            
-      - name: Checkout ESP-IDF
-        uses: actions/checkout@v7
-        with:
-          repository: espressif/esp-idf
-          path: esp-idf-install
-          ref: release/v5.3
-          
-      - name: Install ESP-IDF
-        run: |
-          cd esp-idf-install
-          git submodule update --init --recursive
-          ./install.sh
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build ccache
 
-      - name: Set environment and build NCNN for ESP32
-        run: |
-          source esp-idf-install/export.sh
-          echo "IDF_PATH=$IDF_PATH" >> $GITHUB_ENV
-          echo "${IDF_PATH}/tools" >> $GITHUB_PATH
-          echo "${IDF_PATH}/components" >> $GITHUB_PATH
-          mkdir -p build-esp32 && cd build-esp32
-          cmake -DCMAKE_TOOLCHAIN_FILE="../toolchains/esp32.toolchain.cmake" -DCMAKE_BUILD_TYPE=Release -DNCNN_BUILD_EXAMPLES=OFF ..
-          make -j 4
-          make install
+    - name: Checkout ESP-IDF
+      uses: actions/checkout@v7
+      with:
+        repository: espressif/esp-idf
+        path: esp-idf-install
+        ref: release/v5.3
+
+    - name: Install ESP-IDF
+      run: |
+        cd esp-idf-install
+        git submodule update --init --recursive
+        ./install.sh
+
+    - name: Set environment and build NCNN for ESP32
+      run: |
+        source esp-idf-install/export.sh
+        echo "IDF_PATH=$IDF_PATH" >> $GITHUB_ENV
+        echo "${IDF_PATH}/tools" >> $GITHUB_PATH
+        echo "${IDF_PATH}/components" >> $GITHUB_PATH
+        mkdir -p build-esp32 && cd build-esp32
+        cmake -DCMAKE_TOOLCHAIN_FILE="../toolchains/esp32.toolchain.cmake" -DCMAKE_BUILD_TYPE=Release -DNCNN_BUILD_EXAMPLES=OFF ..
+        make -j 4
+        make install

@@ -13,8 +13,9 @@ on:
     - 'src/layer/vulkan/**'
     - 'glslang'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/harmonyos.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -32,7 +33,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, centos]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
 
     env:
       OHOS_NDK_HOME: /data/action/osd/ohos-sdk/linux/native
@@ -44,9 +48,19 @@ jobs:
         -DNCNN_VULKAN=ON \
 
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh harmonyos
 
     # - name: setup-sdk
     #   run: |
@@ -60,30 +74,30 @@ jobs:
       run: |
         mkdir build-armeabi-v7a && cd build-armeabi-v7a
         ${{ env.OHOS_NDK_CMAKE }} ${{ env.NCNN_CMAKE_OPTIONS }} -DOHOS_ARCH="armeabi-v7a" ..
-        ${{ env.OHOS_NDK_CMAKE }} --build . -j 4
+        ${{ env.OHOS_NDK_CMAKE }} --build . -j 2
     - name: arm64-v8a
       run: |
         mkdir build-arm64-v8a && cd build-arm64-v8a
         ${{ env.OHOS_NDK_CMAKE }} ${{ env.NCNN_CMAKE_OPTIONS }} -DOHOS_ARCH="arm64-v8a" ..
-        ${{ env.OHOS_NDK_CMAKE }} --build . -j 4
+        ${{ env.OHOS_NDK_CMAKE }} --build . -j 2
     - name: x86_64
       run: |
         mkdir build-x86_64 && cd build-x86_64
         ${{ env.OHOS_NDK_CMAKE }} ${{ env.NCNN_CMAKE_OPTIONS }} -DOHOS_ARCH="x86_64" ..
-        ${{ env.OHOS_NDK_CMAKE }} --build . -j 4
+        ${{ env.OHOS_NDK_CMAKE }} --build . -j 2
 
     - name: armeabi-v7a-shared
       run: |
         mkdir build-armeabi-v7a-shared && cd build-armeabi-v7a-shared
         ${{ env.OHOS_NDK_CMAKE }} ${{ env.NCNN_CMAKE_OPTIONS }} -DOHOS_ARCH="armeabi-v7a" -DNCNN_SHARED_LIB=ON ..
-        ${{ env.OHOS_NDK_CMAKE }} --build . -j 4
+        ${{ env.OHOS_NDK_CMAKE }} --build . -j 2
     - name: arm64-v8a-shared
       run: |
         mkdir build-arm64-v8a-shared && cd build-arm64-v8a-shared
         ${{ env.OHOS_NDK_CMAKE }} ${{ env.NCNN_CMAKE_OPTIONS }} -DOHOS_ARCH="arm64-v8a" -DNCNN_SHARED_LIB=ON ..
-        ${{ env.OHOS_NDK_CMAKE }} --build . -j 4
+        ${{ env.OHOS_NDK_CMAKE }} --build . -j 2
     - name: x86_64-shared
       run: |
         mkdir build-x86_64-shared && cd build-x86_64-shared
         ${{ env.OHOS_NDK_CMAKE }} ${{ env.NCNN_CMAKE_OPTIONS }} -DOHOS_ARCH="x86_64" -DNCNN_SHARED_LIB=ON ..
-        ${{ env.OHOS_NDK_CMAKE }} --build . -j 4
+        ${{ env.OHOS_NDK_CMAKE }} --build . -j 2

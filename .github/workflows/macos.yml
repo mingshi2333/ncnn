@@ -20,8 +20,9 @@ on:
     - '!benchmark/README.md'
     - 'glslang'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/macos.yml'
     - 'toolchains/ios.toolchain.cmake'
     - 'CMakeLists.txt'
@@ -52,6 +53,7 @@ permissions:
 
 jobs:
   build:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: macos-15-intel
     env:
       OPENMP_VERSION: '18.1.2'
@@ -84,6 +86,8 @@ jobs:
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: cache-openmp
       id: cache-openmp
@@ -190,4 +194,4 @@ jobs:
       run: |
         printf "[Processor]\nThreadCount=1\n" > build-x86_64/tests/SwiftShader.ini
         export VK_ICD_FILENAMES="$GITHUB_WORKSPACE/swiftshader-install/vk_swiftshader_icd.json"
-        cd build-x86_64 && ctest --output-on-failure -j 4
+        cd build-x86_64 && ctest --no-tests=error --output-on-failure -j 4

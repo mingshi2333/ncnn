@@ -12,8 +12,9 @@ on:
     - 'src/layer/x86/**'
     - 'tests/**'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-x86-cpu-gcc.yml'
     - 'toolchains/host.gcc-m32.toolchain.cmake'
     - 'CMakeLists.txt'
@@ -30,9 +31,13 @@ permissions:
 
 jobs:
   linux-gcc:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: update
       run: sudo apt-get update
     - name: gcc-multilib
@@ -43,14 +48,14 @@ jobs:
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host.gcc-m32.toolchain.cmake -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test
-      run: cd build && ctest --output-on-failure -j $(nproc)
+      run: cd build && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-nosse
       run: |
         mkdir build-nosse && cd build-nosse
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host.gcc-m32.toolchain.cmake -DNCNN_RUNTIME_CPU=OFF -DNCNN_SSE2=OFF -DNCNN_AVX=OFF -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test-nosse
-      run: cd build-nosse && ctest --output-on-failure -j $(nproc)
+      run: cd build-nosse && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-shared
       run: |
         mkdir build-shared && cd build-shared
@@ -62,4 +67,4 @@ jobs:
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host.gcc-m32.toolchain.cmake -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_INT8=OFF ..
         cmake --build . -j $(nproc)
     - name: test-noint8
-      run: cd build-noint8 && ctest --output-on-failure -j $(nproc)
+      run: cd build-noint8 && ctest --no-tests=error --output-on-failure -j $(nproc)

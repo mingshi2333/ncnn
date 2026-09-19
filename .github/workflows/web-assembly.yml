@@ -11,8 +11,9 @@ on:
     - 'src/layer/x86/**'
     - 'tests/**'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/web-assembly.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -32,9 +33,13 @@ permissions:
 
 jobs:
   webassembly:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: emsdk
       run: |
         git clone https://github.com/emscripten-core/emsdk.git
@@ -51,7 +56,7 @@ jobs:
     - name: test-basic
       run: |
         cd build-basic
-        TESTS_EXECUTABLE_LOADER=node ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=node ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-simd
       run: |
         source emsdk/emsdk_env.sh
@@ -62,7 +67,7 @@ jobs:
     - name: test-simd
       run: |
         cd build-simd
-        TESTS_EXECUTABLE_LOADER=node ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=node ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-simd-omp
       run: |
         source emsdk/emsdk_env.sh
@@ -73,4 +78,4 @@ jobs:
     - name: test-simd-omp
       run: |
         cd build-simd-omp
-        TESTS_EXECUTABLE_LOADER=node ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=node ctest --no-tests=error --output-on-failure -j $(nproc)

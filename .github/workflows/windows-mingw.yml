@@ -13,8 +13,9 @@ on:
     - 'tests/**'
     - 'glslang'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/windows-mingw.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -32,6 +33,7 @@ permissions:
 
 jobs:
   windows:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: MinGW-w64
     runs-on: windows-2022
 
@@ -43,6 +45,8 @@ jobs:
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: x64
       run: |

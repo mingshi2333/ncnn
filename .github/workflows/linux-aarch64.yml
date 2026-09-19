@@ -14,8 +14,9 @@ on:
     - 'benchmark/**'
     - '!benchmark/README.md'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-aarch64.yml'
     - 'toolchains/aarch64-linux-gnu.toolchain.cmake'
     - 'CMakeLists.txt'
@@ -34,9 +35,13 @@ permissions:
 
 jobs:
   aarch64-native:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: build
       run: |
@@ -44,7 +49,7 @@ jobs:
         cmake -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test
-      run: cd build && ctest --output-on-failure -j $(nproc)
+      run: cd build && ctest --no-tests=error --output-on-failure -j $(nproc)
 
     - name: build-noint8
       run: |
@@ -52,7 +57,7 @@ jobs:
         cmake -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON -DNCNN_INT8=OFF ..
         cmake --build . -j $(nproc)
     - name: test-noint8
-      run: cd build-noint8 && ctest --output-on-failure -j $(nproc)
+      run: cd build-noint8 && ctest --no-tests=error --output-on-failure -j $(nproc)
 
     - name: build-simplestl-simplemath
       run: |
@@ -60,12 +65,16 @@ jobs:
         cmake -DNCNN_STDIO=ON -DNCNN_STRING=ON -DNCNN_SIMPLESTL=ON -DNCNN_SIMPLEMATH=ON -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test-simplestl-simplemath
-      run: cd build-simplestl-simplemath && ctest --output-on-failure -j $(nproc)
+      run: cd build-simplestl-simplemath && ctest --no-tests=error --output-on-failure -j $(nproc)
 
   asan:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: build
       run: |
         mkdir build && cd build
@@ -74,12 +83,16 @@ jobs:
     - name: test
       run: |
         cd build
-        ctest --output-on-failure -j $(nproc)
+        ctest --no-tests=error --output-on-failure -j $(nproc)
 
   aarch64:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: aarch64-gnu-toolchain
       run: |
@@ -93,19 +106,19 @@ jobs:
         cmake --build . -j $(nproc)
 
     - name: test-a53
-      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a53" ctest --output-on-failure -j $(nproc)
+      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a53" ctest --no-tests=error --output-on-failure -j $(nproc)
 
     - name: test-a55
-      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a55" ctest --output-on-failure -j $(nproc)
+      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a55" ctest --no-tests=error --output-on-failure -j $(nproc)
 
     - name: test-a72
-      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a72" ctest --output-on-failure -j $(nproc)
+      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a72" ctest --no-tests=error --output-on-failure -j $(nproc)
 
     - name: test-a76
-      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a76" ctest --output-on-failure -j $(nproc)
+      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a76" ctest --no-tests=error --output-on-failure -j $(nproc)
 
     - name: test-a710
-      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a710" ctest --output-on-failure -j $(nproc)
+      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;cortex-a710" ctest --no-tests=error --output-on-failure -j $(nproc)
 
     - name: test-max
-      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;max" ctest --output-on-failure -j $(nproc)
+      run: cd build && TESTS_EXECUTABLE_LOADER=qemu-aarch64-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/aarch64-linux-gnu;-cpu;max" ctest --no-tests=error --output-on-failure -j $(nproc)

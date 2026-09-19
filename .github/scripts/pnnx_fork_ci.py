@@ -18,10 +18,11 @@ import xml.etree.ElementTree as ET
 
 import yaml
 
+from ncnn_fork_ci import CI_FILES
+
 ROOT = Path(__file__).resolve().parents[2]
 FIX = '66a109e4b0ce92be3cfe8b10b514510e3b89f84f'
 BASE = '7af5e93d10df7cdc05a776a92e3559fed52b3cfa'
-CI_FILES = {'.github/scripts/pnnx_fork_ci.py', '.github/workflows/pnnx-fork-validation.yml'}
 CODE_FILES = set(['tools/pnnx/src/ir.cpp', 'tools/pnnx/src/save_onnx.cpp', 'tools/pnnx/tests/CMakeLists.txt', 'tools/pnnx/tests/ncnn/test_attribute.py', 'tools/pnnx/tests/pnnx_test_utils.py', 'tools/pnnx/tests/pt2_expectations.py', 'tools/pnnx/tests/test_exported_program_parameter_roundtrip.cpp', 'tools/pnnx/tests/test_pnnx_test_utils.py', 'tools/pnnx/tests/test_python_codegen_paths.py'])
 VERSIONS = ['1.8.1', '1.9.1', '1.10.0', '1.11.0', '1.12.0', '1.13.0',
             '2.0.0', '2.1.0', '2.2.1', '2.3.0', '2.4.0', '2.5.0', '2.6.0',

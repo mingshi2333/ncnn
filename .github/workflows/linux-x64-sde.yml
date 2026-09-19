@@ -16,8 +16,9 @@ on:
     - 'benchmark/**'
     - '!benchmark/README.md'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-x64-sde.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -38,9 +39,13 @@ permissions:
 
 jobs:
   gcc-sde:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: update
       run: sudo apt-get update
     - name: gcc14
@@ -61,36 +66,36 @@ jobs:
     - name: test-p4p
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-p4p;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-p4p;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-snb
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-snb;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-snb;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-hsw
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-hsw;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-hsw;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-adl
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-adl;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-adl;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-arl
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-arl;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-arl;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-skx
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-skx;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-skx;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-spr
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-spr;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-spr;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-gnr
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-gnr;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-gnr;--" ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: test-dmr
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-dmr;--" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=$SDE_PATH/sde64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-dmr;--" ctest --no-tests=error --output-on-failure -j $(nproc)

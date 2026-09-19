@@ -18,8 +18,9 @@ on:
     - '!benchmark/README.md'
     - 'glslang'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/windows.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -42,9 +43,11 @@ permissions:
 
 jobs:
   msvc:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: ${{ matrix.vs-version }}
     runs-on: windows-2022
     strategy:
+      fail-fast: false
       matrix:
         include:
           - vs-version: vs2015
@@ -67,6 +70,8 @@ jobs:
       with:
         submodules: true
         
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: Install VS 2017 (v141) Build Tools
       if: matrix.vs-version == 'vs2017'
       run: |
