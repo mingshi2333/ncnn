@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -89,7 +90,29 @@ class Pt2ProducerStatusTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "conversion now passes"):
             pnnx_test_utils._handle_pt2_conversion_success(name)
 
-        self.assertEqual(pnnx_test_utils.pt2_expectation("ordinary_test"), (PASS, ""))
+        self.assertEqual(pnnx_test_utils.pt2_expectation("ordinary_test", (2, 9, 0)), (PASS, ""))
+
+    def test_funnel_failure_boundary_is_producer_specific(self):
+        name = "test_transformers_funnel_attention"
+        export_diagnostic = "GuardOnDataDependentSymNode: Could not guard on data-dependent expression"
+        for version in ("2.9.0+cpu", "2.9.1", "2.10.0", "2.13.0+cpu", "unknown"):
+            with self.subTest(version=version), mock.patch.object(torch, "__version__", version):
+                category, diagnostic = PT2_EXPECTED_FAILURES[name]
+                if version == "2.9.0+cpu":
+                    category, diagnostic = EXPORT_UNSUPPORTED, export_diagnostic
+                with self.assertRaises(SystemExit) as raised:
+                    pnnx_test_utils._handle_pt2_failure(name, category, diagnostic)
+                self.assertEqual(raised.exception.code, 77)
+                wrong_category = (PT2_FRONTEND_UNSUPPORTED if category == EXPORT_UNSUPPORTED
+                                  else EXPORT_UNSUPPORTED)
+                with self.assertRaisesRegex(AssertionError, "failure category changed"):
+                    pnnx_test_utils._handle_pt2_failure(name, wrong_category, diagnostic)
+                with self.assertRaisesRegex(AssertionError, "diagnostic changed"):
+                    pnnx_test_utils._handle_pt2_failure(name, category, "unrelated failure")
+                with self.assertRaisesRegex(AssertionError, "conversion now passes"):
+                    pnnx_test_utils._handle_pt2_conversion_success(name)
+                with self.assertRaisesRegex(AssertionError, "failure category changed"):
+                    pnnx_test_utils._handle_pt2_failure("ordinary_test", category, diagnostic)
 
 
 class Pt2RunnerTest(unittest.TestCase):
@@ -203,6 +226,104 @@ class Pt2GeneratedArtifactTest(unittest.TestCase):
                 self.assertFalse(any(path.exists() for path in stale_paths))
             finally:
                 os.chdir(original_cwd)
+
+
+class NcnnTestRuntimeTest(unittest.TestCase):
+    option_names = (
+        "use_fp16_packed", "use_fp16_storage", "use_fp16_arithmetic",
+        "use_bf16_storage",
+    )
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.path = Path(self.temp_dir.name) / "precision_ncnn.py"
+        self.source = (
+            "import ncnn\n"
+            "def test_inference():\n"
+            "    with ncnn.Net() as net:\n"
+            "        net.load_param('model.param')\n"
+            "        net.load_model('model.bin')\n"
+            "        return net\n"
+        )
+        self.path.write_text(self.source)
+        self.binding = types.ModuleType("ncnn")
+        option_names = self.option_names
+
+        class Net:
+            def __init__(self, *args, **kwargs):
+                self.arguments = (args, kwargs)
+                self.opt = types.SimpleNamespace(**dict.fromkeys(option_names, True))
+                self.observed_options = []
+
+            def __enter__(self):
+                self.observed_options.append(vars(self.opt).copy())
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def load_param(self, path):
+                self.observed_options.append(vars(self.opt).copy())
+
+            def load_model(self, path):
+                self.observed_options.append(vars(self.opt).copy())
+
+        self.binding.Net = Net
+        self.binding.Mat = object()
+        self.original_net = Net
+
+    def import_module(self, path=None):
+        with mock.patch.dict(pnnx_test_utils.sys.modules, {"ncnn": self.binding}):
+            module = pnnx_test_utils._import_generated_module(
+                path or self.path, "native_precision_regression"
+            )
+        self.addCleanup(pnnx_test_utils.sys.modules.pop, module.__name__, None)
+        return module
+
+    def test_fp32_options_are_set_before_context_and_model_loading(self):
+        net = self.import_module().test_inference()
+        self.assertEqual(len(net.observed_options), 3)
+        for observed in net.observed_options:
+            self.assertEqual(observed, dict.fromkeys(self.option_names, False))
+
+    def test_native_binding_defaults_are_not_changed_globally(self):
+        self.import_module().test_inference()
+        self.assertIs(self.binding.Net, self.original_net)
+        self.assertEqual(
+            vars(self.binding.Net().opt), dict.fromkeys(self.option_names, True)
+        )
+
+    def test_other_binding_attributes_are_forwarded(self):
+        module = self.import_module()
+        self.assertIs(module.ncnn.Mat, self.binding.Mat)
+
+    def test_constructor_arguments_and_independent_options_are_preserved(self):
+        module = self.import_module()
+        first = module.ncnn.Net("test", marker=True)
+        second = module.ncnn.Net()
+        self.assertEqual(first.arguments, (("test",), {"marker": True}))
+        self.assertIsNot(first.opt, second.opt)
+        first.opt.use_fp16_storage = True
+        self.assertFalse(second.opt.use_fp16_storage)
+
+    def test_pnnx_module_import_does_not_wrap_native_binding(self):
+        path = self.path.with_name("precision_pnnx.py")
+        path.write_text(self.source)
+        module = self.import_module(path)
+        self.assertIs(module.ncnn, self.binding)
+        self.assertTrue(module.test_inference().opt.use_fp16_storage)
+
+    def test_generated_deployment_source_is_not_modified(self):
+        original = self.path.read_bytes()
+        self.import_module().test_inference()
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_native_inference_errors_are_not_suppressed(self):
+        module = self.import_module()
+        with mock.patch.object(self.original_net, "load_model", side_effect=RuntimeError("load failed")):
+            with self.assertRaisesRegex(RuntimeError, "load failed"):
+                module.test_inference()
 
 
 if __name__ == "__main__":
