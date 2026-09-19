@@ -41,7 +41,7 @@ jobs:
       run: |
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -y
-        apt-get install -y build-essential wget cmake xz-utils
+        apt-get install -y build-essential wget cmake xz-utils python3
         wget https://github.com/llvm/llvm-project/releases/download/llvmorg-10.0.1/llvm-project-10.0.1.tar.xz
         tar -xf llvm-project-10.0.1.tar.xz
         cd llvm-project-10.0.1
