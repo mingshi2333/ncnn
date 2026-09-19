@@ -22,8 +22,9 @@ on:
     - 'benchmark/**'
     - '!benchmark/README.md'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-riscv64.yml'
     - 'toolchains/riscv64-linux-gnu.toolchain.cmake'
     - 'toolchains/riscv64-unknown-linux-gnu.toolchain.cmake'
@@ -50,9 +51,13 @@ permissions:
 
 jobs:
   gcc-riscv64:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: cache-qemu
       id: cache-qemu
@@ -96,11 +101,14 @@ jobs:
       run: |
         export PATH=$GITHUB_WORKSPACE/qemu-install/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/riscv64-linux-gnu" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/riscv64-linux-gnu" ctest --no-tests=error --output-on-failure -j $(nproc)
 
   xuantie:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: xuantie-${{ matrix.cpu }}
-    runs-on: [self-hosted, linux, ubuntu]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     strategy:
       fail-fast: false
       matrix:
@@ -111,7 +119,23 @@ jobs:
           - { cpu: c907, QEMU_CPU: c907fdv-rv64,   OPENMP: ON,  RVV: ON,  XTHEADVECTOR: OFF, ZFH: ON, ZVFH: ON  }
 
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      env:
+        XUANTIE_GCC_URL: ${{ vars.XUANTIE_GCC_URL }}
+        XUANTIE_GCC_SHA256: ${{ vars.XUANTIE_GCC_SHA256 }}
+        XUANTIE_QEMU_URL: ${{ vars.XUANTIE_QEMU_URL }}
+        XUANTIE_QEMU_SHA256: ${{ vars.XUANTIE_QEMU_SHA256 }}
+      run: bash .github/scripts/ncnn_fork_setup.sh xuantie
 
     - name: build
       run: |
@@ -125,17 +149,20 @@ jobs:
             -DNCNN_ZFH=${{ matrix.ZFH }} \
             -DNCNN_ZVFH=${{ matrix.ZVFH }} \
             -DNCNN_SIMPLEOCV=ON -DNCNN_BUILD_EXAMPLES=ON -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: test
       run: |
         export PATH=/data/action/osd/xuantie-qemu-x86_64-Ubuntu-20.04-V5.4.1/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }}" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }}" ctest --no-tests=error --output-on-failure -j 2
 
   spacemit:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: spacemit-${{ matrix.cpu }}
-    runs-on: [self-hosted, linux, ubuntu]
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     strategy:
       fail-fast: false
       matrix:
@@ -143,7 +170,18 @@ jobs:
           - { cpu: x60, QEMU_CPU: "max,vlen=256,elen=64,vext_spec=v1.0", OPENMP: ON, RVV: ON, XTHEADVECTOR: OFF, ZFH: ON, ZVFH: ON }
 
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh spacemit
 
     # https://archive.spacemit.com/toolchain/spacemit-toolchain-linux-glibc-x86_64-v1.2.4.tar.xz
     - name: build-gcc
@@ -158,7 +196,7 @@ jobs:
             -DNCNN_ZFH=${{ matrix.ZFH }} \
             -DNCNN_ZVFH=${{ matrix.ZVFH }} \
             -DNCNN_SIMPLEOCV=ON -DNCNN_BUILD_EXAMPLES=ON -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: build-llvm
       run: |
@@ -172,7 +210,7 @@ jobs:
             -DNCNN_ZFH=${{ matrix.ZFH }} \
             -DNCNN_ZVFH=${{ matrix.ZVFH }} \
             -DNCNN_SIMPLEOCV=ON -DNCNN_BUILD_EXAMPLES=ON -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     # https://archive.spacemit.com/spacemit-ai/qemu/jdsk-qemu-v10.0.2.tar.gz
     - name: test-gcc
@@ -180,19 +218,33 @@ jobs:
         export RISCV_ROOT_PATH=/data/action/osd/spacemit-toolchain-linux-glibc-x86_64-v1.2.4
         export PATH=/data/action/osd/jdsk-qemu/bin:$PATH
         cd build-gcc
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }};-L;${RISCV_ROOT_PATH}/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }};-L;${RISCV_ROOT_PATH}/sysroot" ctest --no-tests=error --output-on-failure -j 2
 
     - name: test-llvm
       run: |
         export RISCV_ROOT_PATH=/data/action/osd/spacemit-toolchain-linux-glibc-x86_64-v1.2.4
         export PATH=/data/action/osd/jdsk-qemu/bin:$PATH
         cd build-llvm
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }};-L;${RISCV_ROOT_PATH}/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;${{ matrix.QEMU_CPU }};-L;${RISCV_ROOT_PATH}/sysroot" ctest --no-tests=error --output-on-failure -j 2
 
   gcc-rvv:
-    runs-on: [self-hosted, linux, ubuntu]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh rvv
 
     #- name: cache-qemu
       #id: cache-qemu
@@ -226,24 +278,38 @@ jobs:
         export RISCV_ROOT_PATH=/data/action/osd/riscv
         mkdir build && cd build
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/riscv64-unknown-linux-gnu.toolchain.cmake -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: test-vlen256
       run: |
         export PATH=/data/action/osd/qemu-install/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=256,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=256,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --no-tests=error --output-on-failure -j 2
 
     - name: test-vlen128
       run: |
         export PATH=/data/action/osd/qemu-install/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=128,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=128,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --no-tests=error --output-on-failure -j 2
 
   clang-rvv:
-    runs-on: [self-hosted, linux, ubuntu]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh rvv
 
     #- name: cache-qemu
       #id: cache-qemu
@@ -277,16 +343,16 @@ jobs:
         export RISCV_ROOT_PATH=/data/action/osd/riscv
         mkdir build && cd build
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/riscv64-unknown-linux-gnu.llvm-toolchain.cmake -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
     - name: test-vlen256
       run: |
         export PATH=/data/action/osd/qemu-install/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=256,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=256,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --no-tests=error --output-on-failure -j 2
 
     - name: test-vlen128
       run: |
         export PATH=/data/action/osd/qemu-install/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=128,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --output-on-failure -j 8
+        TESTS_EXECUTABLE_LOADER=qemu-riscv64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="-cpu;rv64,v=true,zfh=true,zvfh=true,vlen=128,elen=64,vext_spec=v1.0;-L;/data/action/osd/riscv/sysroot" ctest --no-tests=error --output-on-failure -j 2

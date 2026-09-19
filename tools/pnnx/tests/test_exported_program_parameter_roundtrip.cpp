@@ -249,6 +249,30 @@ static int test_attribute_file_roundtrip()
     return failures;
 }
 
+static int test_trailing_parameter_whitespace()
+{
+    const std::string param = "7767517\n"
+                              "2 2\n"
+                              "pnnx.Input input 0 1 x #x=(1)f32\n"
+                              "prim::ListConstruct construct 1 1 x values    \n";
+
+    pnnx::Graph graph;
+    if (graph.parse(param) != 0 || graph.ops.size() != 2)
+    {
+        fprintf(stderr, "failed to parse graph with trailing parameter whitespace\n");
+        return 1;
+    }
+
+    const pnnx::Operator* construct = graph.ops[1];
+    if (!construct->params.empty())
+    {
+        fprintf(stderr, "trailing parameter whitespace created %lu synthetic parameters\n", (unsigned long)construct->params.size());
+        return 1;
+    }
+
+    return 0;
+}
+
 static int test_explicit_scalar_parse()
 {
     const std::string param = "7767517\n"
@@ -398,6 +422,13 @@ static int test_real_scalar_state_roundtrip(const char* param_path, const char* 
 
 int main(int argc, char** argv)
 {
+    if (argc == 4 && strcmp(argv[1], "--python-paths") == 0)
+    {
+        pnnx::Graph graph;
+        if (graph.parse("7767517\n2 1\npnnx.Input input 0 1 x #x=(1)f32\npnnx.Output output 1 0 x\n") != 0)
+            return 1;
+        return graph.python(argv[2], argv[3], {}, pnnx::get_model_stat(graph), true);
+    }
     if (argc == 4)
     {
         pnnx::Graph graph;
@@ -422,5 +453,6 @@ int main(int argc, char** argv)
     failures += test_storezip_writer_lifecycle();
     failures += test_attribute_file_roundtrip();
     failures += test_explicit_scalar_parse();
+    failures += test_trailing_parameter_whitespace();
     return failures ? 1 : 0;
 }

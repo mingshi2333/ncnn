@@ -1,0 +1,43 @@
+name: ncnn-fork-validation
+
+on:
+  pull_request:
+    branches: [pnnx-exported-program]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ncnn-fork-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  inventory:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - run: python -m pip install PyYAML==6.0.3
+    - name: Verify candidate isolation and preserved upstream test scope
+      env:
+        VALIDATION_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        python .github/scripts/ncnn_fork_ci.py self-test
+        python .github/scripts/ncnn_fork_ci.py verify > "$RUNNER_TEMP/ncnn-fork-inventory.json"
+        cat "$RUNNER_TEMP/ncnn-fork-inventory.json"
+        echo 'Inventory validation is not a full-CI pass. Every platform result must still be reconciled.' >> "$GITHUB_STEP_SUMMARY"
+        echo 'Two real T4 jobs and five exact-version Xuantie SDK jobs remain required; missing environments are not passes.' >> "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ncnn-fork-inventory
+        path: ${{ runner.temp }}/ncnn-fork-inventory.json
+        if-no-files-found: error
+        retention-days: 14

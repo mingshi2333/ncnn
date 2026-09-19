@@ -18,8 +18,9 @@ on:
     - '!benchmark/README.md'
     - 'glslang'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-x64-gpu-gcc.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -42,11 +43,24 @@ permissions:
 
 jobs:
   linux-gcc-gpu:
-    runs-on: [self-hosted, linux, ubuntu25]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh swiftshader
 
     - name: cache-swiftshader
       id: cache-swiftshader
@@ -68,7 +82,7 @@ jobs:
         git -c submodule."third_party/git-hooks".update=none submodule update --init --recursive
         mkdir -p build; cd build
         cmake -DCMAKE_INSTALL_PREFIX=install -DSWIFTSHADER_BUILD_PVR=FALSE -DSWIFTSHADER_BUILD_TESTS=FALSE -DSWIFTSHADER_ENABLE_ASTC=FALSE -DSWIFTSHADER_WARNINGS_AS_ERRORS=FALSE -DREACTOR_BACKEND=Subzero -DREACTOR_DEFAULT_OPT_LEVEL=Default -DCMAKE_BUILD_TYPE=Release ..
-        cmake --build . -j 8
+        cmake --build . -j 2
         mkdir $GITHUB_WORKSPACE/swiftshader-install
         cp Linux/* $GITHUB_WORKSPACE/swiftshader-install
 
@@ -76,22 +90,26 @@ jobs:
       run: |
         mkdir build && cd build
         cmake -DNCNN_VULKAN=ON -DNCNN_BUILD_TESTS=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
     - name: test
       run: |
         printf "[Processor]\nThreadCount=1\n" > build/tests/SwiftShader.ini
         export VK_ICD_FILENAMES="$GITHUB_WORKSPACE/swiftshader-install/vk_swiftshader_icd.json"
-        cd build && ctest --output-on-failure -j 8
+        cd build && ctest --no-tests=error --output-on-failure -j 2
     - name: build-shared
       run: |
         mkdir build-shared && cd build-shared
         cmake -DNCNN_VULKAN=ON -DNCNN_SHARED_LIB=ON ..
-        cmake --build . -j 8
+        cmake --build . -j 2
 
   linux-gcc-gpu-system-glslang:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: install-deps
       run: |
@@ -110,11 +128,14 @@ jobs:
         cmake --build . -j $(nproc)
 
   linux-gcc-gpu-t4:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: [self-hosted, linux, t4]
     steps:
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: build
       env:
         CC: gcc
@@ -128,4 +149,4 @@ jobs:
       env:
         LD_LIBRARY_PATH: /data/action/install/lib64
       run: |
-        cd build && ctest --output-on-failure -j 4
+        cd build && ctest --no-tests=error --output-on-failure -j 4

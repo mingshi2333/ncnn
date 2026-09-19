@@ -11,7 +11,7 @@ on:
     paths-ignore: ['**.md']
   pull_request:
     # The branches below must be a subset of the branches above
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths-ignore: ['**.md']
   schedule:
     - cron: '0 20 * * 4'
@@ -25,6 +25,7 @@ permissions:
 
 jobs:
   analyze:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     permissions:
       actions: read  # for github/codeql-action/init to get workflow details
       contents: read  # for actions/checkout to fetch code
@@ -48,11 +49,8 @@ jobs:
         # We must fetch at least the immediate parents so that if this is
         # a pull request then we can checkout the head.
         fetch-depth: 2
-
-    # If this run was triggered by a pull request event, then checkout
-    # the head of the pull request instead of the merge commit.
-    - run: git checkout HEAD^2
-      if: ${{ github.event_name == 'pull_request' }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL

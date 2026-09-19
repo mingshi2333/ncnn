@@ -13,8 +13,9 @@ on:
     - 'tests/**'
     - 'glslang'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/windows-arm.yml'
     - 'CMakeLists.txt'
     - 'cmake/**'
@@ -32,9 +33,11 @@ permissions:
 
 jobs:
   windows:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: ${{ matrix.vs-version }}
     runs-on: windows-2022
     strategy:
+      fail-fast: false
       matrix:
         include:
           - vs-version: vs2019
@@ -53,6 +56,8 @@ jobs:
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - uses: GuillaumeFalourd/setup-windows10-sdk-action@v2.5
       with:
         sdk-version: ${{ matrix.windows-sdk-version }}
@@ -68,11 +73,15 @@ jobs:
         cmake --build . --config Release -j 4
 
   woa-linux:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     name: woa-linux
     runs-on: ubuntu-latest
     container: linaro/wine-arm64
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: msvc-wine
       env:
         WINEPREFIX: /tmp/wine-x64-prefix/
@@ -97,9 +106,10 @@ jobs:
     - name: test
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=wine-arm64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=wine-arm64 TESTS_EXECUTABLE_LOADER_ARGUMENTS="" ctest --no-tests=error --output-on-failure -j $(nproc)
 
   windows-arm:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: windows-11-arm
     env:
       UseMultiToolTask: true
@@ -108,6 +118,8 @@ jobs:
     - uses: actions/checkout@v7
       with:
         submodules: true
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: build
       run: |
         mkdir build; cd build

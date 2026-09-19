@@ -53,7 +53,7 @@ def _selected_format():
 
 
 def _handle_pt2_failure(basename, category, detail):
-    expected_category, expected_substring = pt2_expectation(basename)
+    expected_category, expected_substring = pt2_expectation(basename, _torch_version_tuple())
 
     if expected_category != category:
         raise AssertionError(
@@ -75,7 +75,7 @@ def _handle_pt2_failure(basename, category, detail):
 
 
 def _handle_pt2_conversion_success(basename):
-    expected_category, _ = pt2_expectation(basename)
+    expected_category, _ = pt2_expectation(basename, _torch_version_tuple())
     if expected_category != PASS:
         raise AssertionError(
             "%s pt2 conversion now passes; update its expectation from %s to PASS"
@@ -104,6 +104,25 @@ def _remove_generated_artifacts(output_basename, archive_suffix):
         _remove_if_present(Path(output_basename + suffix))
 
 
+class _NcnnTestRuntime:
+    # fp16=0 controls saved weights, not runtime storage or arithmetic. Scope
+    # FP32 validation to this generated test module, leaving ncnn.Net and the
+    # generated deployment script's default options unchanged.
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    def Net(self, *args, **kwargs):
+        net = self._binding.Net(*args, **kwargs)
+        net.opt.use_fp16_packed = False
+        net.opt.use_fp16_storage = False
+        net.opt.use_fp16_arithmetic = False
+        net.opt.use_bf16_storage = False
+        return net
+
+
 def _import_generated_module(path, basename):
     module_name = "_pnnx_test_%s" % re.sub(r"[^0-9A-Za-z_]", "_", basename)
     sys.modules.pop(module_name, None)
@@ -113,6 +132,8 @@ def _import_generated_module(path, basename):
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
+    if Path(path).name.endswith("_ncnn.py"):
+        module.ncnn = _NcnnTestRuntime(module.ncnn)
     return module
 
 

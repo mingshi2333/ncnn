@@ -17,8 +17,9 @@ on:
     - 'benchmark/**'
     - '!benchmark/README.md'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-x64-cpu-clang.yml'
     - 'toolchains/host-c.clang.toolchain.cmake'
     - 'CMakeLists.txt'
@@ -40,9 +41,13 @@ permissions:
 
 jobs:
   linux-clang:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: update
       run: sudo apt-get update
     - name: protobuf
@@ -56,7 +61,7 @@ jobs:
         cmake -DNCNN_AVX=OFF -DNCNN_AVX2=OFF -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-sse2
-      run: cd build-sse2 && ctest --output-on-failure -j $(nproc)
+      run: cd build-sse2 && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-shared
       env:
         CC: clang
@@ -74,7 +79,7 @@ jobs:
         cmake -DNCNN_AVX2=ON -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-avx2
-      run: cd build-avx2 && ctest --output-on-failure -j $(nproc)
+      run: cd build-avx2 && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-avx
       env:
         CC: clang
@@ -84,7 +89,7 @@ jobs:
         cmake -DNCNN_AVX2=OFF -DNCNN_AVX=ON -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-avx
-      run: cd build-avx && ctest --output-on-failure -j $(nproc)
+      run: cd build-avx && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-avx1-2
       env:
         CC: clang
@@ -94,7 +99,7 @@ jobs:
         cmake -DNCNN_AVX2=ON -DNCNN_AVX=ON -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-avx1-2
-      run: cd build-avx1-2 && ctest --output-on-failure -j $(nproc)
+      run: cd build-avx1-2 && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-noint8
       env:
         CC: clang
@@ -104,12 +109,16 @@ jobs:
         cmake -DNCNN_INT8=OFF -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-noint8
-      run: cd build-noint8 && ctest --output-on-failure -j $(nproc)
+      run: cd build-noint8 && ctest --no-tests=error --output-on-failure -j $(nproc)
 
   linux-clang-simplestl:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: build-simplestl
       env:
         CC: clang
@@ -119,7 +128,7 @@ jobs:
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host-c.clang.toolchain.cmake -DNCNN_STDIO=ON -DNCNN_STRING=ON -DNCNN_SIMPLESTL=ON -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_BENCHMARK=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test-simplestl
-      run: cd build-simplestl && ctest --output-on-failure -j $(nproc)
+      run: cd build-simplestl && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-simplestl-simpleomp
       env:
         CC: clang
@@ -129,4 +138,4 @@ jobs:
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host-c.clang.toolchain.cmake -DNCNN_STDIO=ON -DNCNN_STRING=ON -DNCNN_SIMPLESTL=ON -DNCNN_SIMPLEOMP=ON -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_BENCHMARK=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test-simplestl-simpleomp
-      run: cd build-simplestl-simpleomp && ctest --output-on-failure -j $(nproc)
+      run: cd build-simplestl-simpleomp && ctest --no-tests=error --output-on-failure -j $(nproc)

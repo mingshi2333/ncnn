@@ -17,8 +17,9 @@ on:
     - 'benchmark/**'
     - '!benchmark/README.md'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-x64-cpu-gcc.yml'
     - 'toolchains/host-c.gcc.toolchain.cmake'
     - 'CMakeLists.txt'
@@ -40,9 +41,13 @@ permissions:
 
 jobs:
   linux-gcc:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: update
       run: sudo apt-get update
     - name: protobuf
@@ -53,7 +58,7 @@ jobs:
         cmake -DNCNN_AVX=OFF -DNCNN_AVX2=OFF -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-sse2
-      run: cd build-sse2 && ctest --output-on-failure -j $(nproc)
+      run: cd build-sse2 && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-shared
       run: |
         mkdir build-shared && cd build-shared
@@ -65,33 +70,37 @@ jobs:
         cmake -DNCNN_AVX2=ON -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-avx2
-      run: cd build-avx2 && ctest --output-on-failure -j $(nproc)
+      run: cd build-avx2 && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-avx
       run: |
         mkdir build-avx && cd build-avx
         cmake -DNCNN_AVX2=OFF -DNCNN_AVX=ON -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-avx
-      run: cd build-avx && ctest --output-on-failure -j $(nproc)
+      run: cd build-avx && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-avx1-2
       run: |
         mkdir build-avx1-2 && cd build-avx1-2
         cmake -DNCNN_AVX2=ON -DNCNN_AVX=ON -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-avx1-2
-      run: cd build-avx1-2 && ctest --output-on-failure -j $(nproc)
+      run: cd build-avx1-2 && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-noint8
       run: |
         mkdir build-noint8 && cd build-noint8
         cmake -DNCNN_INT8=OFF -DNCNN_BUILD_TESTS=ON ..
         cmake --build . -j $(nproc)
     - name: test-noint8
-      run: cd build-noint8 && ctest --output-on-failure -j $(nproc)
+      run: cd build-noint8 && ctest --no-tests=error --output-on-failure -j $(nproc)
 
   asan:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: build
       run: |
         mkdir build && cd build
@@ -100,19 +109,23 @@ jobs:
     - name: test
       run: |
         cd build
-        ctest --output-on-failure -j $(nproc)
+        ctest --no-tests=error --output-on-failure -j $(nproc)
 
   linux-gcc-cpp03-nostdio-nostring-simplestl:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
     - name: build-nostdio
       run: |
         mkdir build-nostdio && cd build-nostdio
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host.gcc-c++03.toolchain.cmake -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test-nostdio
-      run: cd build-nostdio && ctest --output-on-failure -j $(nproc)
+      run: cd build-nostdio && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-nostdio-nostring
       run: |
         mkdir build-nostdio-nostring && cd build-nostdio-nostring
@@ -124,19 +137,33 @@ jobs:
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host-c.gcc.toolchain.cmake -DNCNN_STDIO=ON -DNCNN_STRING=ON -DNCNN_SIMPLESTL=ON -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_BENCHMARK=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test-simplestl
-      run: cd build-simplestl && ctest --output-on-failure -j $(nproc)
+      run: cd build-simplestl && ctest --no-tests=error --output-on-failure -j $(nproc)
     - name: build-simplestl-simpleomp
       run: |
         mkdir build-simplestl-simpleomp && cd build-simplestl-simpleomp
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/host-c.gcc.toolchain.cmake -DNCNN_STDIO=ON -DNCNN_STRING=ON -DNCNN_SIMPLESTL=ON -DNCNN_SIMPLEOMP=ON -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_BENCHMARK=OFF -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
         cmake --build . -j $(nproc)
     - name: test-simplestl-simpleomp
-      run: cd build-simplestl-simpleomp && ctest --output-on-failure -j $(nproc)
+      run: cd build-simplestl-simpleomp && ctest --no-tests=error --output-on-failure -j $(nproc)
 
   linux-gcc-avx512:
-    runs-on: [self-hosted, linux, t4]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh avx512
     - name: build
       env:
         CC: gcc
@@ -145,8 +172,8 @@ jobs:
       run: |
         mkdir build && cd build
         cmake -DNCNN_AVX2=ON -DNCNN_AVX512=ON -DNCNN_AVX512VNNI=ON -DNCNN_BUILD_TESTS=ON -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
-        cmake --build . -j 4
+        cmake --build . -j 2
     - name: test
       env:
         LD_LIBRARY_PATH: /data/action/install/lib64
-      run: cd build && ctest --output-on-failure -j 4
+      run: cd build && ctest --no-tests=error --output-on-failure -j 2

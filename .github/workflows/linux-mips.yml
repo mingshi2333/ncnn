@@ -13,8 +13,9 @@ on:
     - 'src/layer/mips/**'
     - 'tests/**'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/linux-mips.yml'
     - 'toolchains/mipsel-linux-gnu.toolchain.cmake'
     - 'toolchains/mipsisa32r6el-linux-gnu.toolchain.cmake'
@@ -32,9 +33,13 @@ permissions:
 
 jobs:
   mipsel:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: mipsel-gnu-toolchain
       run: |
@@ -50,12 +55,16 @@ jobs:
     - name: test
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-mipsel-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/mipsel-linux-gnu" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=qemu-mipsel-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/mipsel-linux-gnu" ctest --no-tests=error --output-on-failure -j $(nproc)
 
   mipsisa32r6el:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: mipsisa32r6el-gnu-toolchain
       run: |
@@ -71,4 +80,4 @@ jobs:
     - name: test
       run: |
         cd build
-        TESTS_EXECUTABLE_LOADER=qemu-mipsel-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/mipsisa32r6el-linux-gnu" ctest --output-on-failure -j $(nproc)
+        TESTS_EXECUTABLE_LOADER=qemu-mipsel-static TESTS_EXECUTABLE_LOADER_ARGUMENTS="-L;/usr/mipsisa32r6el-linux-gnu" ctest --no-tests=error --output-on-failure -j $(nproc)

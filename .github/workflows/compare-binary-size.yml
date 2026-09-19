@@ -1,8 +1,9 @@
 name: compare-binary-size
 on:
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/compare-binary-size.yml'
     - 'toolchains/**'
     - 'CMakeLists.txt'
@@ -19,19 +20,21 @@ permissions:
 
 jobs:
   compare-size:
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
     runs-on: ubuntu-latest
     steps:
     - name: checkout-pr-branch
       uses: actions/checkout@v7
       with:
-        ref: refs/pull/${{ github.event.pull_request.number }}/merge
         submodules: true
         path: pr
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: checkout-base-branch
       uses: actions/checkout@v7
       with:
-        ref: ${{ github.event.pull_request.base.ref }}
+        ref: ${{ github.event.pull_request.base.sha }}
         repository: ${{ github.event.pull_request.base.repo.full_name }}
         submodules: true
         path: base

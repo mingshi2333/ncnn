@@ -12,8 +12,9 @@ on:
     - 'src/layer/riscv/**'
     - 'tests/**'
   pull_request:
-    branches: [master]
+    branches: [master, pnnx-exported-program]
     paths:
+    - '.github/scripts/ncnn_fork_ci.py'
     - '.github/workflows/elf-riscv32.yml'
     - 'toolchains/riscv32-unknown-elf.toolchain.cmake'
     - 'CMakeLists.txt'
@@ -30,9 +31,23 @@ permissions:
 
 jobs:
   rv32gc:
-    runs-on: [self-hosted, linux, centos]
+    if: github.repository == 'mingshi2333/ncnn' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'validation/pt2-f64-onnx-fp16-full-20260916'
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:25.04
     steps:
+    - name: fork-bootstrap
+      run: |
+        apt-get update --error-on=any
+        apt-get install -y build-essential cmake git ca-certificates curl wget xz-utils unzip python3 python3-venv ninja-build pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev
+
     - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: fork-provision
+      run: bash .github/scripts/ncnn_fork_setup.sh elf32
 
     #- name: riscv-gnu-toolchain
       #run: |
@@ -82,10 +97,10 @@ jobs:
         export RISCV_ROOT_PATH=/data/action/osd/riscv32-elf
         mkdir build && cd build
         cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/riscv32-unknown-elf.toolchain.cmake -DNCNN_THREADS=OFF -DNCNN_OPENMP=OFF -DNCNN_BUILD_TESTS=ON -DNCNN_RVV=OFF -DNCNN_XTHEADVECTOR=OFF -DNCNN_ZFH=OFF -DNCNN_ZVFH=OFF ..
-        cmake --build . -j 4
+        cmake --build . -j 2
 
     - name: test
       run: |
         export PATH=/data/action/osd/riscv32-elf/bin:$PATH
         cd build
-        TESTS_EXECUTABLE_LOADER=spike TESTS_EXECUTABLE_LOADER_ARGUMENTS="--isa=rv32gc;/data/action/osd/riscv32-elf/riscv32-unknown-elf/bin/pk" ctest --output-on-failure -j 4
+        TESTS_EXECUTABLE_LOADER=spike TESTS_EXECUTABLE_LOADER_ARGUMENTS="--isa=rv32gc;/data/action/osd/riscv32-elf/riscv32-unknown-elf/bin/pk" ctest --no-tests=error --output-on-failure -j 2
